@@ -1,9 +1,9 @@
 import axios, { AxiosInstance } from 'axios';
 import { ApiResponse, UserInfo, WordItem, TestRecord, GameRecord } from '../types';
 
-const BASE = 'http://localhost:8080/api';
+const BASE = '/api';
 
-const client: AxiosInstance = axios.create({ baseURL: BASE, timeout: 10000, withCredentials: true });
+const client: AxiosInstance = axios.create({ baseURL: BASE, timeout: 10000 });
 
 // Debug: log test-related requests/responses to help trace missing stats/records
 client.interceptors.request.use((cfg) => {
@@ -94,6 +94,11 @@ export async function listWords(username: string, admin = false) {
   return unwrap<WordItem[]>(resp);
 }
 
+export async function updateWord(original: string, payload: { word: string; meaning: string; example: string; pos?: string; origin?: string; status?: string }) {
+  const resp = await client.post('/word/update', { original, ...payload });
+  return unwrap<null>(resp);
+}
+
 // 兼容旧前端接口与类型 —— 在项目中多处直接 import 自 `src/lib/api` 的名称
 export interface ApiWord {
   id: string;
@@ -177,13 +182,17 @@ function mapWordItem(w: WordItem): ApiWord {
 /** 前端兼容接口：根据查询返回 { words, total } */
 export async function getWords(q?: string) {
   const resp = await client.get('/word/list', { params: { q } }).catch(async () => {
-    // 若后端不支持 q 参数，退回到 listWords
-    const list = await listWords('', false);
+    const list = await listWords('', true);
     return { data: { code: 200, msg: 'ok', data: list } } as any;
   });
   const data = unwrap<WordItem[] | any[]>(resp);
   const arr: WordItem[] = Array.isArray(data) ? data as WordItem[] : (data as WordItem[]);
-  const words = arr.map(mapWordItem);
+  let words = arr.map(mapWordItem);
+  // 兼容旧后端：/word/list 不传 admin=1 时按空用户名过滤返回0条，降级为管理员视图取全部词
+  if (words.length === 0) {
+    const list = await listWords('', true);
+    words = list.map(mapWordItem);
+  }
   return { words, total: words.length };
 }
 
@@ -226,24 +235,32 @@ export async function getStats(username: string) {
   return unwrap<any>(resp);
 }
 
+function pickWordOfDay(words: WordItem[]): WordItem | null {
+  if (words.length === 0) return null;
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  let hash = 0;
+  for (let i = 0; i < dateStr.length; i++) {
+    hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return words[Math.abs(hash) % words.length];
+}
+
 export async function getDashboardStats(roleOrUser?: string) : Promise<DashboardStats> {
-  // 容错：后端 /api/stats 要求传入 username，否则会返回参数缺失。
-  // 尝试请求用户统计，若失败则返回默认空统计以免阻塞 UI 渲染。
   let s: any = {};
   try {
-    const param = (roleOrUser === 'admin' || roleOrUser === 'student') ? '' : (roleOrUser || '');
-    // 如果是具体用户名，调用 /api/stats 并获取该用户的词条以计算 totalWords/recentWords
-    if (param) {
-      s = await getStats(param);
+    const username = roleOrUser || '';
+    if (username) {
+      s = await getStats(username);
       try {
-        const words = await listWords(param, false).catch(() => [] as WordItem[]);
+        const words = await listWords(username, false).catch(() => [] as WordItem[]);
         s.recentWords = (words || []).slice(0, 6);
         s.totalWords = (words || []).length;
+        s.wordOfDay = pickWordOfDay(words || []);
       } catch (e) {
         // ignore
       }
-    } else {
-      s = {};
     }
   } catch (err) {
     console.warn('getDashboardStats: getStats failed, returning empty stats', err);
@@ -252,10 +269,14 @@ export async function getDashboardStats(roleOrUser?: string) : Promise<Dashboard
   const stats: DashboardStats = {
     recentWords: (s.recentWords || []).map((w: any) => mapWordItem(w)),
     wordOfDay: s.wordOfDay ? mapWordItem(s.wordOfDay) : null,
-    userStats: { accuracy: s.accuracy ?? s.userAccuracy, masteredCount: s.masteredCount ?? 0, streak: s.streak ?? 0 },
+    userStats: {
+      accuracy: (s.accuracy ?? 0) * 100,
+      masteredCount: s.masteredCount ?? 0,
+      streak: s.streak ?? 0,
+    },
     totalWords: s.totalWords ?? 0,
-    totalTests: s.totalTests ?? 0,
-    globalAccuracy: s.globalAccuracy ?? s.globalAccuracy,
+    totalTests: s.total_tests ?? s.totalTests ?? 0,
+    globalAccuracy: s.globalAccuracy ?? (s.accuracy ?? 0) * 100,
   };
   return stats;
 }

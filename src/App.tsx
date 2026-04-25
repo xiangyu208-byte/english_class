@@ -25,30 +25,33 @@ const App: React.FC = () => {
     role: 'student'
   });
 
-  // 从 localStorage 恢复会话（页面刷新后保持登录）
+  // 从 sessionStorage 恢复会话和上次所在页面（刷新后保持登录和页面位置）
+  const restorePageRef = React.useRef(false);
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('lexical_user');
+      const raw = sessionStorage.getItem('lexical_session');
       if (raw) {
         const parsed = JSON.parse(raw) as User;
         if (parsed && (parsed.username || parsed.id)) {
           setUser(parsed);
           setIsLoggedIn(true);
-          try { setCurrentUserId(parsed.id || parsed.username || ''); } catch (e) {}
+          setCurrentUserId(parsed.id || parsed.username || '');
+          // 恢复上次所在的页面
+          const savedPage = sessionStorage.getItem('lexical_page') as Page | null;
+          if (savedPage && savedPage !== 'login') {
+            setCurrentPage(savedPage);
+            restorePageRef.current = true;
+          }
         }
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }, []);
 
-  /**
-   * 登录成功后的回调
-   * @param loggedInUser 后端返回的用户信息
-   */
+  // 切换页面并保存到 sessionStorage（刷新后自动回到该页面）
   const changePage = (page: Page) => {
     try { console.debug('App.changePage ->', page); } catch (e) {}
     setCurrentPage(page);
+    try { sessionStorage.setItem('lexical_page', page); } catch (e) {}
   };
 
   const handleLogin = (loggedInUser: User) => {
@@ -63,7 +66,7 @@ const App: React.FC = () => {
     setIsLoggedIn(true);
     setUser(mapped);
     setCurrentUserId(mapped.id);
-    try { localStorage.setItem('lexical_user', JSON.stringify(mapped)); } catch (e) {}
+    try { sessionStorage.setItem('lexical_session', JSON.stringify(mapped)); } catch (e) {}
     changePage('dashboard');
   };
 
@@ -78,7 +81,7 @@ const App: React.FC = () => {
       email: '',
       role: 'student'
     });
-    try { localStorage.removeItem('lexical_user'); } catch (e) {}
+    try { sessionStorage.removeItem('lexical_session'); sessionStorage.removeItem('lexical_page'); } catch (e) {}
     changePage('login');
   };
 
@@ -88,7 +91,7 @@ const App: React.FC = () => {
 
   const handleSearch = (query: string) => {
     setInitialSearchQuery(query);
-    setCurrentPage('dictionary');
+    changePage('dictionary');
   };
 
   const renderPage = () => {
@@ -96,21 +99,21 @@ const App: React.FC = () => {
     
     switch (currentPage) {
       case 'dashboard':
-        return <DashboardPage onPageChange={setCurrentPage} isAdmin={isAdmin} user={user} />;
+        return <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
       case 'test':
-        return isAdmin ? <DashboardPage onPageChange={setCurrentPage} isAdmin={isAdmin} user={user} /> : <TestPage user={user} />;
+        return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <TestPage user={user} />;
       case 'entry':
         return <EntryPage user={user} />;
       case 'game':
-        return isAdmin ? <DashboardPage onPageChange={setCurrentPage} isAdmin={isAdmin} user={user} /> : <GamePage />;
+        return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <GamePage />;
       case 'users':
-        return isAdmin ? <UsersPage /> : <DashboardPage onPageChange={setCurrentPage} isAdmin={isAdmin} user={user} />;
+        return isAdmin ? <UsersPage /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
       case 'settings':
         return <SettingsPage user={user} onUpdateUser={handleUpdateUser} />;
       case 'dictionary':
         return <DictionaryPage initialQuery={initialSearchQuery} />;
       default:
-        return <DashboardPage onPageChange={setCurrentPage} isAdmin={isAdmin} user={user} />;
+        return <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
     }
   };
 
@@ -122,7 +125,7 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-surface">
       <TopNav 
         currentPage={currentPage} 
-        onPageChange={setCurrentPage} 
+        onPageChange={changePage} 
         user={user} 
         onUpdateUser={handleUpdateUser} 
         onSearch={handleSearch}
@@ -130,7 +133,7 @@ const App: React.FC = () => {
       <div className="flex">
         <Sidebar 
           currentPage={currentPage} 
-          onPageChange={setCurrentPage} 
+          onPageChange={changePage} 
           onLogout={handleLogout} 
           user={user}
         />

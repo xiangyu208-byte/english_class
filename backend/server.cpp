@@ -10,6 +10,7 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <unordered_set>
 
 using json = nlohmann::json;
 using namespace httplib;
@@ -455,6 +456,40 @@ int main() {
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
     });
 
+    // Update word: POST /api/word/update {original,word,meaning,example,pos,origin,creator,status}
+    svr.Post(R"(/api/word/update)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string original = j.value("original", "");
+            std::string word = j.value("word", "");
+            std::string meaning = j.value("meaning", "");
+            std::string example = j.value("example", "");
+            std::string pos = j.value("pos", "");
+            std::string origin = j.value("origin", "");
+            std::string creator = j.value("creator", "");
+            std::string status = j.value("status", "进行中");
+            if (original.empty() || creator.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            auto lines = read_all_lines(WORDS_CSV);
+            bool found = false;
+            for (auto &ln : lines) {
+                auto f = parse_csv_line(ln);
+                if (f.size() >= 7 && f[0] == original && f[5] == creator) {
+                    std::vector<std::string> fields = {word, meaning, example, pos, origin, creator, status};
+                    ln.clear();
+                    for (size_t i = 0; i < fields.size(); ++i) {
+                        ln += escape_csv_field(fields[i]);
+                        if (i + 1 < fields.size()) ln.push_back(',');
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) { res.set_content(make_resp(500, "单词未找到"), "application/json"); return; }
+            if (!write_all_lines(WORDS_CSV, lines)) { res.set_content(make_resp(500, "写入失败"), "application/json"); return; }
+            res.set_content(make_resp(200, "更新成功"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
     // List words: GET /api/word/list?username=xxx&admin=1
     svr.Get(R"(/api/word/list)", [&](const Request &req, Response &res){
         std::string username = req.get_param_value("username");
@@ -551,14 +586,16 @@ int main() {
         int errors = 0;
         double avg_time = 0.0;
         int cnt = 0;
+        std::unordered_set<std::string> masteredWords;
         for (auto &ln : lines) {
             auto f = parse_csv_line(ln);
             if (f.size() < 6) continue;
             if (f[0] != username) continue;
             ++cnt; avg_time += std::stod(f[3]); if (std::stoi(f[2])==0) ++errors;
+            if (std::stoi(f[2]) == 1) masteredWords.insert(f[1]);
         }
         if (cnt>0) avg_time /= cnt;
-        json data = { {"total_tests", u.total_tests}, {"correct", u.correct}, {"errors", errors}, {"accuracy", u.accuracy}, {"avg_time", avg_time}, {"streak", u.streak} };
+        json data = { {"total_tests", u.total_tests}, {"correct", u.correct}, {"errors", errors}, {"accuracy", u.accuracy}, {"avg_time", avg_time}, {"streak", u.streak}, {"masteredCount", masteredWords.size()} };
         res.set_content(make_resp(200, "ok", data), "application/json");
     });
 

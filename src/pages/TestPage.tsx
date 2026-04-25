@@ -15,20 +15,19 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
   const [correctAnswer, setCorrectAnswer] = useState('');
   const [questionIndex, setQuestionIndex] = useState(0);
   const [stats, setStats] = useState<UserStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   /**
    * 从后端加载随机单词
    */
   const loadNextWord = useCallback(async () => {
     try {
-      setLoading(true);
       const word = await getRandomWord(user.id);
       setCurrentWord(word);
     } catch (err) {
       console.error('Failed to load word:', err);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   }, [user.id]);
 
@@ -50,10 +49,10 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
   }, [loadNextWord, loadStats]);
 
   /**
-   * 提交答案到后端验证
-   */
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    * 提交答案到后端验证
+    */
+  const handleSubmit = async (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e?.preventDefault) e.preventDefault();
     if (answer.trim() === '' || !currentWord) return;
     
     try {
@@ -75,12 +74,21 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
     }
   };
 
-  const handleSkip = () => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !feedback && !initialLoading) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  const handleSkip = (e?: React.MouseEvent) => {
+    if (e?.preventDefault) e.preventDefault();
     setQuestionIndex(prev => prev + 1);
     loadNextWord();
   };
 
-  const handleNext = () => {
+  const handleNext = (e?: React.MouseEvent) => {
+    if (e?.preventDefault) e.preventDefault();
     setQuestionIndex(prev => prev + 1);
     setAnswer('');
     setFeedback(null);
@@ -119,7 +127,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
             <div className="relative z-10">
               <span className="text-on-surface-variant text-sm font-medium tracking-widest uppercase mb-4 block">翻译成中文</span>
               <div className="mb-12">
-                {loading ? (
+                {initialLoading ? (
                   <div className="animate-pulse">
                     <div className="h-16 bg-surface-container-low rounded-lg w-64 mb-6"></div>
                     <div className="h-6 bg-surface-container-low rounded w-96"></div>
@@ -134,27 +142,27 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
                 )}
               </div>
 
-              <form onSubmit={handleSubmit} className="max-w-md">
+              <div className="max-w-md">
                 <input 
                   className="w-full bg-surface-container-low border-none p-6 text-xl rounded-lg font-body placeholder:text-outline/50 focus:ring-2 focus:ring-primary/20 transition-all"
                   placeholder="在此输入释义..."
                   type="text"
                   value={answer}
                   onChange={(e) => setAnswer(e.target.value)}
+                  onKeyDown={handleKeyDown}
                   autoFocus
-                  disabled={feedback !== null || loading}
+                  disabled={feedback !== null || initialLoading}
                 />
                 <div className="mt-8 flex items-center gap-4">
                   <button 
-                    type="submit"
+                    onClick={handleSubmit}
                     className="editorial-gradient text-white rounded-full px-10 py-4 font-headline font-bold text-sm tracking-widest uppercase hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg disabled:opacity-50"
-                    disabled={feedback !== null || loading}
+                    disabled={feedback !== null || initialLoading}
                   >
                     提交答案
                     <ArrowRight className="w-4 h-4" />
                   </button>
                   <button 
-                    type="button"
                     onClick={handleSkip}
                     className="text-primary font-bold text-sm tracking-widest uppercase hover:underline underline-offset-8 transition-all px-4"
                     disabled={feedback !== null}
@@ -165,7 +173,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
                     <button onClick={handleNext} className="ml-2 bg-surface-container-high text-primary px-4 py-2 rounded-full font-bold text-sm">下一个</button>
                   )}
                 </div>
-              </form>
+              </div>
             </div>
           </div>
 

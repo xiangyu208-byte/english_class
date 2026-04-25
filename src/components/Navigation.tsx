@@ -28,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onPageChange, onL
   const navItems = [
     { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
     { id: 'entry', label: '词条录入', icon: PlusSquare },
+    { id: 'dictionary', label: '词库查询', icon: Search },
     ...(isAdmin ? [
       { id: 'users', label: '用户数据', icon: Users },
     ] : [
