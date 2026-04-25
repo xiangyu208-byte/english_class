@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-on-surface: #191c1e;
+  --color-outline: #72787f;
+  --color-surface-container-highest: #e2e2e6;
+  --color-primary: #074469;
+  --color-primary-container: #2a5c82;
+  --color-on-tertiary-fixed-variant: #604100;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #98f994;
+  --color-surface-container-lowest: #ffffff;
+  --color-inverse-on-surface: #f0f0f4;
+  --color-tertiary-fixed-dim: #ffba38;
+  --color-on-tertiary-fixed: #281900;
+  --color-surface-dim: #d9dadd;
+  --color-surface-tint: #316289;
+  --color-secondary: #006e1c;
+  --color-on-secondary-fixed: #002204;
+  --color-on-background: #191c1e;
+  --color-on-tertiary: #ffffff;
+  --color-surface-container-low: #f3f3f7;
+  --color-on-secondary-fixed-variant: #005313;
+  --color-on-error-container: #93000a;
+  --color-surface-variant: #e2e2e6;
+  --color-on-error: #ffffff;
+  --color-tertiary-fixed: #ffdeac;
+  --color-tertiary: #583b00;
+  --color-tertiary-container: #765100;
+  --color-on-primary-fixed: #001d32;
+  --color-on-primary-fixed-variant: #124a6f;
+  --color-surface: #f9f9fd;
+  --color-background: #f9f9fd;
+  --color-surface-container-high: #e7e8eb;
+  --color-on-surface-variant: #41474e;
+  --color-surface-container: #edeef1;
+  --color-error: #ba1a1a;
+  --color-surface-bright: #f9f9fd;
+  --color-on-primary-container: #a5d4ff;
+  --color-primary-fixed: #cde5ff;
+  --color-inverse-surface: #2e3133;
+  --color-error-container: #ffdad6;
+  --color-inverse-primary: #9ccbf7;
+  --color-on-primary: #ffffff;
+  --color-on-tertiary-container: #ffc563;
+  --color-secondary-fixed-dim: #7ddc7a;
+  --color-on-secondary-container: #0c7521;
+  --color-outline-variant: #c1c7cf;
+  --color-primary-fixed-dim: #9ccbf7;
+  --color-secondary-fixed: #98f994;
+
+  --font-headline: "Lexend", sans-serif;
+  --font-body: "Plus Jakarta Sans", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-surface font-body text-on-surface antialiased;
+  }
+}
+
+@layer utilities {
+  .glass-effect {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+  .editorial-gradient {
+    background: linear-gradient(135deg, #074469 0%, #2a5c82 100%);
+  }
+}
+
+ 
