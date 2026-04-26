@@ -21,6 +21,7 @@ static const std::string USERS_CSV = DATA_DIR + "/users.csv";
 static const std::string WORDS_CSV = DATA_DIR + "/words.csv";
 static const std::string RECORDS_CSV = DATA_DIR + "/records.csv";
 static const std::string GAME_RECORDS_CSV = DATA_DIR + "/game_records.csv";
+static const std::string DICT_CSV = DATA_DIR + "/dictionary.csv";
 static std::mutex file_mutex;
 
 // Utility: ensure data directory and files exist
@@ -36,6 +37,7 @@ void ensure_data_files() {
     ensure(WORDS_CSV);
     ensure(RECORDS_CSV);
     ensure(GAME_RECORDS_CSV);
+    ensure(DICT_CSV);
 }
 
 // CSV helper: parse line into fields (handles quoted fields)
@@ -192,6 +194,42 @@ bool delete_user(const std::string &username) {
     }
     write_all_lines(WORDS_CSV, words_out);
     return ok;
+}
+
+// Dictionary entry: word,meaning,source,example,frequency
+struct DictEntry {
+    std::string word, meaning, source, example, frequency;
+};
+
+std::vector<DictEntry> read_dictionary(const std::string &source_filter = "") {
+    std::vector<DictEntry> out;
+    auto lines = read_all_lines(DICT_CSV);
+    bool first = true;
+    for (auto &ln : lines) {
+        if (first) { first = false; continue; } // skip header
+        auto f = parse_csv_line(ln);
+        if (f.size() < 5) continue;
+        if (!source_filter.empty() && f[2] != source_filter) continue;
+        out.push_back({f[0], f[1], f[2], f[3], f[4]});
+    }
+    return out;
+}
+
+std::vector<DictEntry> search_dictionary(const std::string &q, const std::string &source = "") {
+    auto all = read_dictionary(source);
+    if (q.empty()) return all;
+    std::vector<DictEntry> out;
+    std::string lower_q;
+    for (char c : q) lower_q += std::tolower(c);
+    for (auto &d : all) {
+        std::string lower_word;
+        for (char c : d.word) lower_word += std::tolower(c);
+        if (lower_word.find(lower_q) != std::string::npos ||
+            d.meaning.find(q) != std::string::npos) {
+            out.push_back(d);
+        }
+    }
+    return out;
 }
 
 // Word struct fields per spec:
@@ -501,16 +539,35 @@ int main() {
         res.set_content(make_resp(200, "ok", arr), "application/json");
     });
 
-    // Random test: POST /api/test/random {username,count}
+    // Random test: POST /api/test/random {username,count,source,letter}
     svr.Post(R"(/api/test/random)", [&](const Request &req, Response &res){
         try {
             auto j = json::parse(req.body);
             std::string username = j.value("username", "");
             int count = j.value("count", 10);
+            std::string source = j.value("source", "personal");
+            std::string letter = j.value("letter", "");
             if (username.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
-            auto words = random_words_for_user(username, count);
             json arr = json::array();
-            for (auto &w : words) arr.push_back({{"word", w.word}, {"meaning", w.meaning}, {"example", w.example}, {"pos", w.pos}});
+            if (source == "personal") {
+                auto words = random_words_for_user(username, count);
+                for (auto &w : words) arr.push_back({{"word", w.word}, {"meaning", w.meaning}, {"example", w.example}, {"pos", w.pos}, {"source", "personal"}});
+            } else {
+                auto dict = read_dictionary(source);
+                if (!letter.empty()) {
+                    std::vector<DictEntry> filtered;
+                    for (auto &d : dict) {
+                        if (!d.word.empty() && std::tolower(d.word[0]) == std::tolower(letter[0]))
+                            filtered.push_back(d);
+                    }
+                    dict = filtered;
+                }
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(dict.begin(), dict.end(), g);
+                if ((int)dict.size() > count) dict.resize(count);
+                for (auto &d : dict) arr.push_back({{"word", d.word}, {"meaning", d.meaning}, {"example", d.example}, {"source", d.source}});
+            }
             res.set_content(make_resp(200, "ok", arr), "application/json");
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
     });
@@ -540,6 +597,18 @@ int main() {
             if (f.size() < 6) continue;
             if (!username.empty() && f[0] != username) continue;
             arr.push_back({{"username", f[0]}, {"word", f[1]}, {"result", std::stoi(f[2])}, {"time", std::stod(f[3])}, {"skipped", std::stoi(f[4])}, {"ts", f[5]}});
+        }
+        res.set_content(make_resp(200, "ok", arr), "application/json");
+    });
+
+    // Dictionary search: GET /api/dictionary/search?q=xxx&source=cet4
+    svr.Get(R"(/api/dictionary/search)", [&](const Request &req, Response &res){
+        std::string q = req.get_param_value("q");
+        std::string source = req.get_param_value("source");
+        auto results = search_dictionary(q, source);
+        json arr = json::array();
+        for (auto &d : results) {
+            arr.push_back({{"word", d.word}, {"meaning", d.meaning}, {"source", d.source}, {"example", d.example}, {"frequency", d.frequency}});
         }
         res.set_content(make_resp(200, "ok", arr), "application/json");
     });

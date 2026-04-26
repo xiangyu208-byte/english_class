@@ -1,6 +1,14 @@
 import axios, { AxiosInstance } from 'axios';
 import { ApiResponse, UserInfo, WordItem, TestRecord, GameRecord } from '../types';
 
+export interface DictWord {
+  word: string;
+  meaning: string;
+  source: string;
+  example?: string;
+  frequency?: string;
+}
+
 const BASE = '/api';
 
 const client: AxiosInstance = axios.create({ baseURL: BASE, timeout: 10000 });
@@ -202,9 +210,29 @@ export async function deleteWord(id: string) {
   return unwrap<null>(resp as any);
 }
 
+// ============ 内置词典 ============
+export async function searchDictionary(q?: string, source?: string) {
+  const resp = await client.get('/dictionary/search', { params: { q, source } });
+  return unwrap<DictWord[]>(resp);
+}
+
+export async function addWordFromDictionary(word: string, meaning: string, example?: string) {
+  const payload = {
+    word,
+    meaning,
+    example: example || '',
+    pos: '',
+    origin: 'dictionary',
+    creator: getCurrentUserId(),
+    status: '进行中',
+  };
+  const resp = await client.post('/word/add', payload);
+  return unwrap<null>(resp);
+}
+
 // ============ 随机测试 ============
-export async function randomTest(username: string, count = 10) {
-  const resp = await client.post('/test/random', { username, count });
+export async function randomTest(username: string, count = 10, source = 'personal', letter = '') {
+  const resp = await client.post('/test/random', { username, count, source, letter });
   return unwrap<WordItem[]>(resp);
 }
 
@@ -287,9 +315,9 @@ export async function updateUser(id: string, payload: { name?: string; avatar?: 
   return unwrap<null>(resp as any);
 }
 
-export async function getRandomWord(username?: string) {
+export async function getRandomWord(username?: string, source = 'personal', letter = '') {
   const user = username || _currentUserId || '';
-  const list = await randomTest(user, 1).catch(() => [] as WordItem[]);
+  const list = await randomTest(user, 1, source, letter).catch(() => [] as WordItem[]);
   if (!list || list.length === 0) return null as any;
   const w = list[0];
   return { id: w.word, english: w.word, example: w.example, meaning: w.meaning } as RandomWordResponse;

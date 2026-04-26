@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Check, X, Flame, BookOpen } from 'lucide-react';
+import { ArrowRight, Check, X, Flame, BookOpen, GraduationCap } from 'lucide-react';
 import { getRandomWord, submitTest, getUserStats, type RandomWordResponse, type UserStats } from '../lib/api';
 import { User } from '../types';
+
+const TEST_SOURCES = [
+  { value: 'personal', label: '个人词库' },
+  { value: 'cet4', label: '四级词汇' },
+  { value: 'cet6', label: '六级词汇' },
+];
+
+const LETTERS = ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 
 interface TestPageProps {
   user: User;
@@ -16,24 +24,20 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [testSource, setTestSource] = useState('personal');
+  const [testLetter, setTestLetter] = useState('');
 
-  /**
-   * 从后端加载随机单词
-   */
   const loadNextWord = useCallback(async () => {
     try {
-      const word = await getRandomWord(user.id);
+      const word = await getRandomWord(user.id, testSource, testLetter);
       setCurrentWord(word);
     } catch (err) {
       console.error('Failed to load word:', err);
     } finally {
       setInitialLoading(false);
     }
-  }, [user.id]);
+  }, [user.id, testSource, testLetter]);
 
-  /**
-   * 加载用户统计数据
-   */
   const loadStats = useCallback(async () => {
     try {
       const s = await getUserStats(user.id);
@@ -44,30 +48,21 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
   }, [user.id]);
 
   useEffect(() => {
+    setInitialLoading(true);
     loadNextWord();
     loadStats();
   }, [loadNextWord, loadStats]);
 
-  /**
-    * 提交答案到后端验证
-    */
   const handleSubmit = async (e?: React.MouseEvent | React.KeyboardEvent) => {
     if (e?.preventDefault) e.preventDefault();
     if (answer.trim() === '' || !currentWord) return;
-    
     try {
-      console.debug('TestPage.handleSubmit: submitting', { userId: user.id, word: currentWord.id, answer });
-      // 简单判断：把答题与后端提供的 meaning 做不区分大小写比较，若包含则视为正确
       const given = answer.trim().toLowerCase();
       const target = (currentWord.meaning || '').toLowerCase();
       const isCorrect = target && (given === target || target.includes(given) || given.includes(target));
-      // 记录到后端
       await submitTest(user.id || '', currentWord.id, isCorrect ? 1 : 0, 0, 0);
       setFeedback(isCorrect ? 'correct' : 'incorrect');
       setCorrectAnswer(currentWord.meaning || '');
-      console.debug('TestPage.handleSubmit: submitTest finished', { isCorrect });
-      // 不自动跳到下一个单词，保留当前结果，用户手动点击“下一个”继续
-      // 更新本地统计
       loadStats();
     } catch (err) {
       console.error('Failed to submit answer:', err);
@@ -96,9 +91,25 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
     loadNextWord();
   };
 
+  const handleSourceChange = (source: string) => {
+    setTestSource(source);
+    setQuestionIndex(0);
+    setAnswer('');
+    setFeedback(null);
+    setCorrectAnswer('');
+  };
+
+  const handleLetterChange = (letter: string) => {
+    setTestLetter(letter);
+    setQuestionIndex(0);
+    setAnswer('');
+    setFeedback(null);
+    setCorrectAnswer('');
+  };
+
   return (
     <div className="max-w-5xl mx-auto">
-      <header className="mb-16 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <span className="font-headline font-bold text-primary tracking-tight text-sm uppercase">进行中的评估</span>
           <h1 className="font-headline text-5xl font-extrabold text-on-surface tracking-tighter mt-2">词汇测试</h1>
@@ -106,19 +117,48 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-3 text-on-surface-variant font-medium">
             <span className="text-sm">已答题</span>
-            <span className="text-2xl font-headline font-bold text-primary">
-              {questionIndex + 1}
-            </span>
+            <span className="text-2xl font-headline font-bold text-primary">{questionIndex + 1}</span>
           </div>
           <div className="w-48 h-1.5 bg-surface-container-high rounded-full overflow-hidden">
-            <motion.div 
-              className="h-full bg-primary rounded-full" 
+            <motion.div
+              className="h-full bg-primary rounded-full"
               initial={{ width: 0 }}
               animate={{ width: `${Math.min(((questionIndex + 1) / 20) * 100, 100)}%` }}
             />
           </div>
         </div>
       </header>
+
+      <section className="flex flex-wrap gap-3 mb-8">
+        <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+          <GraduationCap className="w-4 h-4 text-primary" />
+          <span className="text-xs font-bold text-on-surface-variant">测试来源:</span>
+          <select
+            value={testSource}
+            onChange={(e) => handleSourceChange(e.target.value)}
+            className="text-sm font-bold text-primary bg-transparent border-none focus:ring-0"
+          >
+            {TEST_SOURCES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+        {testSource !== 'personal' && (
+          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+            <span className="text-xs font-bold text-on-surface-variant">首字母:</span>
+            <select
+              value={testLetter}
+              onChange={(e) => handleLetterChange(e.target.value)}
+              className="text-sm font-bold text-primary bg-transparent border-none focus:ring-0"
+            >
+              <option value="">全部</option>
+              {LETTERS.filter(Boolean).map(l => (
+                <option key={l} value={l}>{l}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start relative">
         <div className="lg:col-span-8">
@@ -138,12 +178,12 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
                     <p className="text-on-surface-variant italic font-body text-lg max-w-md">"{currentWord.example}"</p>
                   </>
                 ) : (
-                  <p className="text-outline text-lg">暂无可用单词，请先录入词库。</p>
+                  <p className="text-outline text-lg">暂无可用单词，请先录入词库或选择其他来源。</p>
                 )}
               </div>
 
               <div className="max-w-md">
-                <input 
+                <input
                   className="w-full bg-surface-container-low border-none p-6 text-xl rounded-lg font-body placeholder:text-outline/50 focus:ring-2 focus:ring-primary/20 transition-all"
                   placeholder="在此输入释义..."
                   type="text"
@@ -154,7 +194,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
                   disabled={feedback !== null || initialLoading}
                 />
                 <div className="mt-8 flex items-center gap-4">
-                  <button 
+                  <button
                     onClick={handleSubmit}
                     className="editorial-gradient text-white rounded-full px-10 py-4 font-headline font-bold text-sm tracking-widest uppercase hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg disabled:opacity-50"
                     disabled={feedback !== null || initialLoading}
@@ -162,7 +202,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
                     提交答案
                     <ArrowRight className="w-4 h-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={handleSkip}
                     className="text-primary font-bold text-sm tracking-widest uppercase hover:underline underline-offset-8 transition-all px-4"
                     disabled={feedback !== null}
@@ -179,7 +219,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
 
           <AnimatePresence mode="wait">
             {feedback === 'correct' && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -195,7 +235,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
               </motion.div>
             )}
             {feedback === 'incorrect' && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -247,8 +287,8 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
           </div>
 
           <div className="relative rounded-xl overflow-hidden aspect-square flex flex-col justify-end p-8 group shadow-sm">
-            <img 
-              alt="Library" 
+            <img
+              alt="Library"
               className="absolute inset-0 object-cover group-hover:scale-105 transition-transform duration-700"
               src="https://picsum.photos/seed/library2/600/600"
               referrerPolicy="no-referrer"
@@ -257,7 +297,7 @@ export const TestPage: React.FC<TestPageProps> = ({ user }) => {
             <div className="relative z-10">
               <span className="text-tertiary-fixed text-xs font-bold uppercase tracking-widest mb-2 block">馆长贴士</span>
               <p className="text-white font-body text-sm leading-relaxed">
-                "Ephemeral" 源于希腊语 'ephēmeros'，意为仅持续一天。想象一下那些寿命只有几小时的蜉蝣。
+                选择不同的测试来源，拓展你的词汇量。从四级到六级，循序渐进。
               </p>
             </div>
           </div>
