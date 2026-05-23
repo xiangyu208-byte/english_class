@@ -3,6 +3,7 @@ import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { TestPage } from './pages/TestPage';
 import { EntryPage } from './pages/EntryPage';
+import { ContributePage } from './pages/ContributePage';
 import { GamePage } from './pages/GamePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DictionaryPage } from './pages/DictionaryPage';
@@ -10,6 +11,12 @@ import { Sidebar, TopNav } from './components/Navigation';
 import { Page, User } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { UsersPage } from './pages/UsersPage';
+import { AdminDictionary } from './pages/AdminDictionary';
+import { AdminReview } from './pages/AdminReview';
+import { AdminGameRecords } from './pages/AdminGameRecords';
+import { AdminConfig } from './pages/AdminConfig';
+import { CommunityPage } from './pages/CommunityPage';
+import { AdminCommunity } from './pages/AdminCommunity';
 import { setCurrentUserId } from './lib/api';
 
 const App: React.FC = () => {
@@ -104,6 +111,8 @@ const App: React.FC = () => {
         return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <TestPage user={user} />;
       case 'entry':
         return <EntryPage user={user} />;
+      case 'contribute':
+        return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <ContributePage user={user} />;
       case 'game':
         return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <GamePage />;
       case 'users':
@@ -112,6 +121,18 @@ const App: React.FC = () => {
         return <SettingsPage user={user} onUpdateUser={handleUpdateUser} />;
       case 'dictionary':
         return <DictionaryPage initialQuery={initialSearchQuery} />;
+      case 'dictionary_manage':
+        return isAdmin ? <AdminDictionary /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
+      case 'review':
+        return isAdmin ? <AdminReview /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
+      case 'game_records':
+        return isAdmin ? <AdminGameRecords /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
+      case 'sys_config':
+        return isAdmin ? <AdminConfig /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
+      case 'community':
+        return isAdmin ? <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} /> : <CommunityPage user={user} />;
+      case 'admin_community':
+        return isAdmin ? <AdminCommunity /> : <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
       default:
         return <DashboardPage onPageChange={changePage} isAdmin={isAdmin} user={user} />;
     }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Book, Plus, Volume2, Check, BookOpen, Library, ChevronLeft } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getWords, searchDictionary, addWordFromDictionary, type ApiWord, type DictWord } from '../lib/api';
+import { listWords, searchDictionary, addWordFromDictionary, type ApiWord, type DictWord } from '../lib/api';
 import { getCurrentUserId } from '../lib/api';
 
 const DICTIONARIES = [
@@ -59,8 +59,22 @@ export const DictionaryPage: React.FC<{ initialQuery?: string }> = ({ initialQue
 
   const loadPersonalWords = async () => {
     try {
-      const data = await getWords('');
-      setPersonalWords(data.words);
+      const username = getCurrentUserId();
+      if (!username) {
+        setPersonalWords([]);
+        return;
+      }
+      const arr = await listWords(username, false);
+      const mapped: ApiWord[] = (arr || []).map((w: any) => ({
+        id: w.word,
+        english: w.word,
+        chinese: w.meaning,
+        example: w.example,
+        status: w.status,
+        letter: w.word ? w.word.charAt(0).toUpperCase() : undefined,
+        createdBy: w.creator,
+      }));
+      setPersonalWords(mapped);
     } catch (e) {
       console.error(e);
     }

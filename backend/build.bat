@@ -14,7 +14,7 @@ where g++ >nul 2>&1
 if %errorlevel% EQU 0 (
     echo Found g++, building with g++...
     cd ..
-    g++ -std=c++17 -O2 -Iinclude server.cpp -o lexical_backend.exe
+    g++ -std=c++17 -O2 -Iinclude server.cpp -o lexical_backend.exe -lws2_32
     if %errorlevel% EQU 0 (
         echo Build successful (g++)
         echo Run: .\backend\lexical_backend.exe

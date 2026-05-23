@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Upload, Edit2, Trash2, BarChart3, CloudUpload, BookOpen, Search, X, Save } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Upload, Edit2, Trash2, BarChart3, CloudUpload, BookOpen, Search, X, Save, FileText, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { addWord, deleteWord, listWords, updateWord, type ApiWord } from '../lib/api';
+import { addWord, deleteWord, listWords, updateWord, importWords, type ApiWord } from '../lib/api';
 import { User } from '../types';
+import * as XLSX from 'xlsx';
 
 interface EntryPageProps {
   user: User;
 }
 
 export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
+  const isStudent = user?.role !== 'admin';
   const [english, setEnglish] = useState('');
   const [chinese, setChinese] = useState('');
   const [example, setExample] = useState('');
@@ -23,6 +25,15 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWord, setSelectedWord] = useState<ApiWord | null>(null);
   const [editingWord, setEditingWord] = useState<ApiWord | null>(null);
+
+  // 批量导入状态
+  const [showBatchImport, setShowBatchImport] = useState(false);
+  const [batchCsvText, setBatchCsvText] = useState('');
+  const [importMode, setImportMode] = useState<'paste' | 'upload'>('paste');
+  const [batchPreview, setBatchPreview] = useState<{ english: string; chinese: string; example: string }[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ attempted: number; added: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadWords();
@@ -60,8 +71,8 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
       setEnglish('');
       setChinese('');
       setExample('');
-      setMessage('单词已成功保存到圣殿！');
-      const newWord: ApiWord = { id: english.trim(), english: english.trim(), chinese: chinese.trim(), example: example.trim(), status: '进行中', letter: english.trim().charAt(0).toUpperCase(), createdBy: user?.username || user?.id || '' };
+      setMessage(isStudent ? '单词已提交，等待管理员审核...' : '单词已成功保存到圣殿！');
+      const newWord: ApiWord = { id: english.trim(), english: english.trim(), chinese: chinese.trim(), example: example.trim(), status: isStudent ? '待审核' : '进行中', letter: english.trim().charAt(0).toUpperCase(), createdBy: user?.username || user?.id || '' };
       setRecentWords(prev => [newWord, ...prev].slice(0, 4));
       setTotalCount(prev => prev + 1);
       setAllWords(prev => [newWord, ...prev]);
@@ -97,6 +108,138 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
       loadWords();
     } catch (err: any) {
       alert('更新失败: ' + (err.message || '未知错误'));
+    }
+  };
+
+  // ============ 批量导入 ============
+  const parseCSV = (text: string) => {
+    const lines = text.split('\n').filter(l => l.trim());
+    const rows: { english: string; chinese: string; example: string }[] = [];
+    for (const line of lines) {
+      if (line.startsWith('英文单词') || line.startsWith('word')) continue;
+      const parts = parseCSVLine(line);
+      if (parts.length >= 2 && parts[0].trim()) {
+        rows.push({ english: parts[0].trim(), chinese: (parts[1] || '').trim(), example: (parts[2] || '').trim() });
+      }
+    }
+    return rows;
+  };
+
+  const parseCSVLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current);
+    return result;
+  };
+
+  const handleBatchTextChange = (text: string) => {
+    setBatchCsvText(text);
+    setImportResult(null);
+    try {
+      const parsed = parseCSV(text);
+      setBatchPreview(parsed);
+    } catch {
+      setBatchPreview([]);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      if (file.name.endsWith('.csv')) {
+        handleBatchTextChange(content);
+      } else {
+        try {
+          const data = new Uint8Array(content.split('').map(c => c.charCodeAt(0)));
+          const wb = XLSX.read(data, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          const lines: string[] = [];
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || !row[0]) continue;
+            const fields = [
+              String(row[0] || ''),
+              String(row[1] || ''),
+              String(row[2] || ''),
+              String(row[3] || ''),
+              String(row[4] || ''),
+              user?.username || user?.id || '',
+              '进行中',
+            ];
+            lines.push(fields.map(f => f.includes(',') || f.includes('"') ? `"${f.replace(/"/g, '""')}"` : f).join(','));
+          }
+          setBatchCsvText(lines.join('\n'));
+          setBatchPreview(parseCSV(lines.join('\n')));
+        } catch {
+          setBatchPreview([]);
+        }
+      }
+    };
+    if (file.name.endsWith('.csv')) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsBinaryString(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const downloadTemplate = () => {
+    const header = '英文单词,中文释义,例句,词性,语源,创建者用户名,掌握状态(已掌握/进行中)';
+    const sample = `apple,苹果,"An apple a day keeps the doctor away.",noun,Old English,${user?.username || user?.id || ''},进行中`;
+    const blob = new Blob([`${header}\n${sample}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '批量导入模板.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBatchImport = async () => {
+    if (!batchPreview.length) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      // 为每行补充 creator 和 status 字段
+      const lines = batchCsvText.split('\n').filter(l => l.trim());
+      const username = user?.username || user?.id || '';
+      const enriched = lines.map(line => {
+        if (line.startsWith('英文单词') || line.startsWith('word')) return '';
+        const parts = parseCSVLine(line);
+        while (parts.length < 7) parts.push('');
+        parts[5] = parts[5] || username;
+        parts[6] = parts[6] || '进行中';
+        return parts.map(f => f.includes(',') || f.includes('"') ? `"${f.replace(/"/g, '""')}"` : f).join(',');
+      }).filter(l => l);
+      const result = await importWords(enriched.join('\n'));
+      setImportResult(result);
+      loadWords();
+    } catch (err: any) {
+      setImportResult({ attempted: batchPreview.length, added: 0 });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -216,12 +359,142 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
           <p className="text-sm opacity-70 mt-4">数据通过 C++ 文件流读写</p>
         </div>
 
-        <div className="bg-surface-container-high p-8 rounded-[2rem] border-2 border-dashed border-outline-variant flex flex-col items-center justify-center text-center group cursor-pointer hover:bg-surface-container-highest transition-colors">
+        <div onClick={() => { setShowBatchImport(true); setImportResult(null); setBatchCsvText(''); setBatchPreview([]); }} className="bg-surface-container-high p-8 rounded-[2rem] border-2 border-dashed border-outline-variant flex flex-col items-center justify-center text-center group cursor-pointer hover:bg-surface-container-highest hover:border-primary/30 transition-all">
           <CloudUpload className="w-10 h-10 text-primary mb-2 group-hover:scale-110 transition-transform" />
-          <p className="font-bold text-primary">批量导入 (即将推出)</p>
+          <p className="font-bold text-primary">批量导入</p>
           <p className="text-xs text-on-surface-variant mt-1">CSV 格式批量上传词条</p>
         </div>
       </section>
+
+      {/* ============ 批量导入弹窗 ============ */}
+      {showBatchImport && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 bg-black/40 backdrop-blur-sm" onClick={() => setShowBatchImport(false)}>
+          <div className="bg-white w-full max-w-3xl mx-4 rounded-2xl shadow-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <h3 className="text-lg font-extrabold text-primary tracking-tight flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                批量导入词条
+              </h3>
+              <button onClick={() => setShowBatchImport(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <X className="w-6 h-6 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {/* 导入方式切换 */}
+              <div className="flex gap-2 mb-6">
+                <button onClick={() => setImportMode('paste')} className={cn("px-5 py-2.5 rounded-full font-bold text-sm transition-all", importMode === 'paste' ? "bg-primary text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}>
+                  <FileText className="w-4 h-4 inline mr-1.5" />
+                  粘贴内容
+                </button>
+                <button onClick={() => setImportMode('upload')} className={cn("px-5 py-2.5 rounded-full font-bold text-sm transition-all", importMode === 'upload' ? "bg-primary text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}>
+                  <Upload className="w-4 h-4 inline mr-1.5" />
+                  上传文件
+                </button>
+                <button onClick={downloadTemplate} className="ml-auto px-5 py-2.5 rounded-full font-bold text-sm bg-secondary-container text-on-secondary-container hover:shadow-md transition-all">
+                  <Download className="w-4 h-4 inline mr-1.5" />
+                  下载模板
+                </button>
+              </div>
+
+              {importMode === 'paste' ? (
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">
+                    CSV 内容（每行7个字段：英文,中文,例句,词性,语源,创建者,状态）
+                  </label>
+                  <textarea
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 transition-all resize-none font-mono text-sm"
+                    placeholder={`apple,苹果,"An apple a day...",noun,Old English,${user?.username || user?.id || ''},进行中`}
+                    rows={10}
+                    value={batchCsvText}
+                    onChange={e => handleBatchTextChange(e.target.value)}
+                  />
+                </div>
+              ) : (
+                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center hover:border-primary/30 transition-colors">
+                  <Upload className="w-12 h-12 text-primary mx-auto mb-4 opacity-50" />
+                  <p className="font-bold text-primary mb-1">点击上传 CSV 或 Excel 文件</p>
+                  <p className="text-xs text-outline mb-4">支持 .csv / .xlsx / .xls 格式</p>
+                  <button onClick={() => fileInputRef.current?.click()} className="bg-primary text-white px-6 py-2.5 rounded-full font-bold text-sm hover:shadow-lg transition-all">
+                    选择文件
+                  </button>
+                  <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileUpload} />
+                </div>
+              )}
+
+              {/* 预览 */}
+              {batchPreview.length > 0 && (
+                <div className="mt-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-bold text-primary flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      预览（共 {batchPreview.length} 条）
+                    </h4>
+                    {batchPreview.length > 500 && (
+                      <span className="text-xs text-error font-bold">超过500条限制，仅前500条会被导入</span>
+                    )}
+                  </div>
+                  <div className="bg-slate-50 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-left">
+                          <th className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-outline">#</th>
+                          <th className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-outline">英文</th>
+                          <th className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-outline">中文释义</th>
+                          <th className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-outline">例句</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchPreview.slice(0, 500).map((row, idx) => (
+                          <tr key={idx} className="border-b border-slate-100 hover:bg-white/50 transition-colors">
+                            <td className="px-4 py-2 text-outline text-xs">{idx + 1}</td>
+                            <td className="px-4 py-2 font-semibold text-primary">{row.english}</td>
+                            <td className="px-4 py-2 text-on-surface">{row.chinese}</td>
+                            <td className="px-4 py-2 text-outline text-xs max-w-xs truncate">{row.example}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 导入结果 */}
+              {importResult && (
+                <div className={cn("mt-6 px-5 py-4 rounded-xl flex items-start gap-3", importResult.added > 0 ? "bg-secondary-container/40" : "bg-error-container/40")}>
+                  {importResult.added > 0 ? <CheckCircle2 className="w-5 h-5 text-secondary mt-0.5" /> : <AlertCircle className="w-5 h-5 text-error mt-0.5" />}
+                  <div>
+                    <p className={cn("font-bold", importResult.added > 0 ? "text-on-secondary-container" : "text-on-error-container")}>
+                      {importResult.added > 0 ? '导入成功！' : '导入失败'}
+                    </p>
+                    <p className="text-sm opacity-80">
+                      共尝试 {importResult.attempted} 条，成功导入 {importResult.added} 条，跳过 {importResult.attempted - importResult.added} 条（重复或无效）。
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 底部操作栏 */}
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-100">
+              <button onClick={() => { setShowBatchImport(false); setBatchCsvText(''); setBatchPreview([]); setImportResult(null); }} className="text-slate-500 px-6 py-2.5 rounded-full font-bold text-sm hover:bg-slate-100 transition-all">
+                取消
+              </button>
+              <button
+                onClick={handleBatchImport}
+                disabled={importing || batchPreview.length === 0}
+                className="bg-primary text-white px-8 py-2.5 rounded-full font-bold text-sm hover:shadow-lg transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {importing ? (
+                  <>导入中 ({batchPreview.length} 条)...</>
+                ) : (
+                  <><Upload className="w-4 h-4" />开始导入</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============ 词库弹窗 ============ */}
       {showLibrary && (

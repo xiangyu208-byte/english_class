@@ -10,7 +10,12 @@ import {
   Search,
   Bell,
   Settings,
-  Users
+  Users,
+  BookOpen,
+  Shield,
+  Swords,
+  Wrench,
+  Globe
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Page, User } from '../types';
@@ -25,16 +30,22 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onPageChange, onLogout, user }) => {
   const isAdmin = user?.role === 'admin';
   
-  const navItems = [
+  const navItems = isAdmin ? [
+    { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
+    { id: 'dictionary_manage', label: '词典管理', icon: BookOpen },
+    { id: 'review', label: '审核中心', icon: Shield },
+    { id: 'users', label: '用户管理', icon: Users },
+    { id: 'game_records', label: '游戏监管', icon: Swords },
+    { id: 'admin_community', label: '社区管理', icon: Globe },
+    { id: 'sys_config', label: '系统配置', icon: Wrench },
+    { id: 'settings', label: '设置', icon: Settings },
+  ] : [
     { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
     { id: 'entry', label: '词条录入', icon: PlusSquare },
+    { id: 'community', label: '用户社区', icon: Globe },
     { id: 'dictionary', label: '词库查询', icon: Search },
-    ...(isAdmin ? [
-      { id: 'users', label: '用户数据', icon: Users },
-    ] : [
-      { id: 'test', label: '词汇测试', icon: GraduationCap },
-      { id: 'game', label: '单词接龙', icon: Gamepad2 },
-    ]),
+    { id: 'test', label: '词汇测试', icon: GraduationCap },
+    { id: 'game', label: '单词接龙', icon: Gamepad2 },
     { id: 'settings', label: '设置', icon: Settings },
   ];
 
@@ -73,14 +84,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onPageChange, onL
         ))}
       </nav>
 
-      <div className="mt-8 mb-4 px-2">
-        <button 
-          onClick={() => onPageChange('entry')}
-          className="w-full bg-gradient-to-br from-primary to-primary-container text-white rounded-full py-2.5 px-4 font-bold text-xs uppercase tracking-wider shadow-sm transition-all active:scale-95"
-        >
-          新建词条
-        </button>
-      </div>
+      {!isAdmin && (
+        <div className="mt-8 mb-4 px-2">
+          <button 
+            onClick={() => onPageChange('entry')}
+            className="w-full bg-gradient-to-br from-primary to-primary-container text-white rounded-full py-2.5 px-4 font-bold text-xs uppercase tracking-wider shadow-sm transition-all active:scale-95"
+          >
+            新建词条
+          </button>
+        </div>
+      )}
 
       <div className="mt-auto flex flex-col gap-1">
         <button className="text-slate-600 flex items-center gap-3 p-3 hover:translate-x-1 hover:text-sky-700 transition-all text-sm">
@@ -116,10 +129,18 @@ export const TopNav: React.FC<{
       case 'dashboard': return '仪表盘';
       case 'test': return '测评';
       case 'entry': return '词条录入';
+      case 'contribute': return '最新单词上传';
+      case 'community': return '用户社区';
       case 'game': return '单词接龙';
-      case 'users': return '用户数据';
+      case 'users': return '用户管理';
       case 'settings': return '设置';
       case 'dictionary': return '词典搜索';
+      case 'dictionary_manage': return '词典管理';
+      case 'review': return '审核中心';
+      case 'users_manage': return '用户管理';
+      case 'game_records': return '游戏监管';
+      case 'admin_community': return '社区管理';
+      case 'sys_config': return '系统配置';
       default: return '仪表盘';
     }
   };
@@ -181,18 +202,26 @@ export const TopNav: React.FC<{
               >
                 接龙
               </button>
+              <button 
+                onClick={() => onPageChange('community')} 
+                className={cn(
+                  "font-semibold transition-colors text-sm",
+                  currentPage === 'community' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600"
+                )}
+              >
+                社区
+              </button>
             </>
           )}
           {isAdmin && (
-            <button 
-              onClick={() => onPageChange('users')} 
-              className={cn(
-                "font-semibold transition-colors text-sm",
-                currentPage === 'users' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600"
-              )}
-            >
-              用户
-            </button>
+            <>
+              <button onClick={() => onPageChange('dictionary_manage')} className={cn("font-semibold transition-colors text-sm", currentPage === 'dictionary_manage' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>词典</button>
+              <button onClick={() => onPageChange('review')} className={cn("font-semibold transition-colors text-sm", currentPage === 'review' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>审核</button>
+              <button onClick={() => onPageChange('users')} className={cn("font-semibold transition-colors text-sm", currentPage === 'users' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>用户</button>
+              <button onClick={() => onPageChange('game_records')} className={cn("font-semibold transition-colors text-sm", currentPage === 'game_records' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>游戏</button>
+              <button onClick={() => onPageChange('sys_config')} className={cn("font-semibold transition-colors text-sm", currentPage === 'sys_config' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>配置</button>
+              <button onClick={() => onPageChange('admin_community')} className={cn("font-semibold transition-colors text-sm", currentPage === 'admin_community' ? "text-sky-700 border-b-2 border-sky-700" : "text-slate-500 hover:text-sky-600")}>社区</button>
+            </>
           )}
         </div>
       </div>

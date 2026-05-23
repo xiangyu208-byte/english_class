@@ -36,18 +36,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           setLoading(false);
           return;
         }
-        const res = await register(username, password, email, role, name || username);
-        onLogin(res.user as User);
+        await register(username, password, role);
+        const mapped: User = {
+          id: username,
+          username,
+          name: name || username,
+          avatar: '',
+          email,
+          role,
+        };
+        onLogin(mapped);
       } else {
         const res = await login(username, password);
-        // 后端返回的是 UserInfo，映射为前端期望的 User 结构
         const mapped: User = {
           id: (res as any).username || username,
           username: (res as any).username || username,
           name: (res as any).name || (res as any).username || username,
           avatar: (res as any).avatar || '',
           email: (res as any).email || '',
-          role: (res as any).role === 'admin' ? 'admin' : 'student'
+          role,
         };
         onLogin(mapped);
       }

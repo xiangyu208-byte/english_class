@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Stars, ArrowRight, CheckCircle, Info, PlusCircle } from 'lucide-react';
+import { Stars, ArrowRight, CheckCircle, Info, PlusCircle, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { validateGameWord } from '../lib/api';
+import { validateGameWord, listWords, getCurrentUserId, WordBank } from '../lib/api';
 
 export const GamePage: React.FC = () => {
   const [gameState, setGameState] = useState<'idle' | 'playing'>('idle');
@@ -13,6 +13,9 @@ export const GamePage: React.FC = () => {
   const [showBonus, setShowBonus] = useState(false);
   const [lastScore, setLastScore] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
+  const [wordBank, setWordBank] = useState<WordBank>('global');
+  const [personalWords, setPersonalWords] = useState<string[]>([]);
 
   const currentWord = history[history.length - 1];
   const lastLetter = currentWord.charAt(currentWord.length - 1).toUpperCase();
@@ -34,13 +37,28 @@ export const GamePage: React.FC = () => {
     return () => clearInterval(timer);
   }, [gameState, score]);
 
-  const startGame = () => {
+  const startGame = async () => {
+    if (wordBank === 'personal') {
+      try {
+        const userId = getCurrentUserId();
+        const words = await listWords(userId);
+        setPersonalWords(words.map(w => w.word));
+      } catch {
+        // fallback to empty list
+      }
+    }
     setHistory(['Labyrinthine', 'Eternal', 'Nostalgic', 'Glimmer', 'Radiant']);
     setScore(0);
     setTimeLeft(60);
     setInput('');
     setError('');
+    setWarning('');
     setGameState('playing');
+  };
+
+  const quitGame = () => {
+    setLastScore(score);
+    setGameState('idle');
   };
 
   /**
@@ -55,18 +73,20 @@ export const GamePage: React.FC = () => {
     }
 
     try {
-      const result = await validateGameWord(currentWord, input.trim());
+      const result = await validateGameWord(currentWord, input.trim(), wordBank, personalWords);
       
       if (result.valid) {
         setHistory(prev => [...prev, input.trim()]);
         setScore(prev => prev + (result.score || 500));
         setInput('');
         setError('');
+        setWarning(result.warning || '');
         setTimeLeft(prev => Math.min(prev + 10, 60));
         setShowBonus(true);
         setTimeout(() => setShowBonus(false), 2000);
       } else {
         setError(result.reason || '无效单词');
+        setWarning('');
       }
     } catch (err: any) {
       setError(err.message || '验证失败');
@@ -88,9 +108,34 @@ export const GamePage: React.FC = () => {
               <Stars className="w-16 h-16 text-primary animate-pulse" />
             </div>
             <h1 className="font-headline text-6xl font-black text-primary tracking-tighter mb-4">单词接龙</h1>
-            <p className="text-outline text-lg max-w-md mb-12">
+            <p className="text-outline text-lg max-w-md mb-8">
               挑战你的词汇量！用上一个单词的末尾字母开始新单词，在限定时间内尽可能接得更长。
             </p>
+
+            <div className="mb-8">
+              <span className="text-xs font-bold text-outline uppercase tracking-widest block mb-3">词库范围</span>
+              <div className="flex gap-2 bg-surface-container-lowest p-1.5 rounded-2xl">
+                {([
+                  { value: 'global', label: '全局词典' },
+                  { value: 'personal', label: '个人词库' },
+                  { value: 'cet4', label: '四级词库' },
+                  { value: 'cet6', label: '六级词库' },
+                ] as { value: WordBank; label: string }[]).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setWordBank(opt.value)}
+                    className={cn(
+                      'px-4 py-2 rounded-xl text-sm font-bold transition-all',
+                      wordBank === opt.value
+                        ? 'bg-primary text-white shadow-md'
+                        : 'text-outline hover:text-on-surface hover:bg-surface-container-low'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             
             {lastScore !== null && (
               <div className="mb-12 bg-surface-container-low px-8 py-4 rounded-2xl border border-primary/10">
@@ -139,6 +184,17 @@ export const GamePage: React.FC = () => {
             exit={{ opacity: 0, y: -20 }}
             className="space-y-12"
           >
+            {/* Exit button */}
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={quitGame}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container-low text-outline hover:text-error hover:bg-error/10 transition-all text-sm font-bold"
+              >
+                <LogOut className="w-4 h-4" />
+                退出接龙
+              </button>
+            </div>
+
             {/* Game Header */}
             <div className="flex justify-between items-end">
               <div className="space-y-1">
@@ -191,6 +247,9 @@ export const GamePage: React.FC = () => {
 
                   {error && (
                     <div className="mb-4 text-error text-sm font-bold">{error}</div>
+                  )}
+                  {warning && (
+                    <div className="mb-4 text-amber-500 text-xs font-bold">{warning}</div>
                   )}
 
                   <form onSubmit={handleSubmit} className="w-full max-w-md relative">

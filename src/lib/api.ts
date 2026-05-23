@@ -309,6 +309,203 @@ export async function getDashboardStats(roleOrUser?: string) : Promise<Dashboard
   return stats;
 }
 
+// ============ Admin: Dashboard ============
+export async function getAdminDashboard() {
+  const resp = await client.get('/admin/dashboard', { params: { role: 'admin' } });
+  return unwrap<import('../types').AdminDashboardStats>(resp);
+}
+
+// ============ Admin: Dictionary Management ============
+export async function listDictEntries(params: { q?: string; source?: string; page?: number; page_size?: number }) {
+  const resp = await client.get('/dictionary/list', { params: { ...params, role: 'admin' } });
+  return unwrap<{ total: number; items: import('../types').DictEntry[] }>(resp);
+}
+
+export async function addDictEntry(entry: import('../types').DictEntry) {
+  const resp = await client.post('/dictionary/add', entry);
+  return unwrap<null>(resp);
+}
+
+export async function updateDictEntry(original_word: string, original_source: string, entry: import('../types').DictEntry) {
+  const resp = await client.post('/dictionary/update', { original_word, original_source, ...entry });
+  return unwrap<null>(resp);
+}
+
+export async function deleteDictEntry(word: string, source: string) {
+  const resp = await client.post('/dictionary/delete', { word, source });
+  return unwrap<null>(resp);
+}
+
+// ============ Word Contribution (to global dictionary) ============
+export async function submitContribution(payload: { word: string; meaning: string; example: string; creator: string }) {
+  const resp = await client.post('/word/contribute', payload);
+  return unwrap<null>(resp);
+}
+
+export async function listContributions(params: { status?: string; page?: number; page_size?: number }) {
+  const resp = await client.get('/admin/contributions/list', { params: { ...params, role: 'admin' } });
+  return unwrap<{ total: number; items: import('../types').ContributionItem[] }>(resp);
+}
+
+export async function approveContribution(word: string, creator: string, meaning: string, example: string, pos: string) {
+  const resp = await client.post('/admin/contributions/approve', { role: 'admin', word, creator, meaning, example, pos });
+  return unwrap<null>(resp);
+}
+
+export async function rejectContribution(word: string, creator: string) {
+  const resp = await client.post('/admin/contributions/reject', { role: 'admin', word, creator });
+  return unwrap<null>(resp);
+}
+
+// ============ Community: Posts ============
+export async function createPost(payload: { username: string; content: string; type?: string; word?: string; meaning?: string; example?: string }) {
+  const resp = await client.post('/community/post/create', payload);
+  return unwrap<{ id: string; created_at: string }>(resp);
+}
+
+export async function listCommunityPosts(params: { page?: number; page_size?: number; type?: string; username?: string }) {
+  const resp = await client.get('/community/posts', { params });
+  return unwrap<{ total: number; items: import('../types').CommunityPost[] }>(resp);
+}
+
+export async function deleteCommunityPost(post_id: string, username: string) {
+  const resp = await client.post('/community/post/delete', { post_id, username });
+  return unwrap<null>(resp);
+}
+
+// ============ Community: Comments ============
+export async function createComment(payload: { post_id: string; username: string; content: string }) {
+  const resp = await client.post('/community/comment/create', payload);
+  return unwrap<{ id: string; created_at: string }>(resp);
+}
+
+export async function listComments(post_id: string) {
+  const resp = await client.get('/community/comments', { params: { post_id } });
+  return unwrap<import('../types').CommunityComment[]>(resp);
+}
+
+export async function deleteComment(comment_id: string, username: string) {
+  const resp = await client.post('/community/comment/delete', { comment_id, username });
+  return unwrap<null>(resp);
+}
+
+// ============ Community: Likes & Favorites ============
+export async function toggleLike(post_id: string, username: string) {
+  const resp = await client.post('/community/toggle_like', { post_id, username });
+  return unwrap<{ liked: boolean; likes_count: number }>(resp);
+}
+
+export async function toggleFavorite(post_id: string, username: string) {
+  const resp = await client.post('/community/toggle_favorite', { post_id, username });
+  return unwrap<{ favorited: boolean }>(resp);
+}
+
+export async function listFavoritePosts(username: string, page = 1) {
+  const resp = await client.get('/community/my_favorites', { params: { username, page } });
+  return unwrap<{ total: number; items: import('../types').CommunityPost[] }>(resp);
+}
+
+// ============ Community: Friends ============
+export async function sendFriendRequest(from_user: string, to_user: string) {
+  const resp = await client.post('/community/friend/request', { from_user, to_user });
+  return unwrap<null>(resp);
+}
+
+export async function acceptFriendRequest(from_user: string, to_user: string) {
+  const resp = await client.post('/community/friend/accept', { from_user, to_user });
+  return unwrap<null>(resp);
+}
+
+export async function removeFriend(user1: string, user2: string) {
+  const resp = await client.post('/community/friend/remove', { user1, user2 });
+  return unwrap<null>(resp);
+}
+
+export async function listFriends(username: string) {
+  const resp = await client.get('/community/friends', { params: { username } });
+  return unwrap<import('../types').FriendItem[]>(resp);
+}
+
+export async function listFriendRequests(username: string) {
+  const resp = await client.get('/community/friend/requests', { params: { username } });
+  return unwrap<import('../types').FriendRequest[]>(resp);
+}
+
+// ============ Admin: Community Management ============
+export async function adminListCommunityPosts(params: { page?: number; page_size?: number }) {
+  const resp = await client.get('/admin/community/posts', { params: { ...params, role: 'admin' } });
+  return unwrap<{ total: number; items: import('../types').CommunityPost[] }>(resp);
+}
+
+export async function adminDeleteCommunityPost(post_id: string) {
+  const resp = await client.post('/admin/community/post/delete', { role: 'admin', post_id });
+  return unwrap<null>(resp);
+}
+
+export async function adminDeleteComment(comment_id: string) {
+  const resp = await client.post('/admin/community/comment/delete', { role: 'admin', comment_id });
+  return unwrap<null>(resp);
+}
+
+// ============ Admin: Review Center ============
+export async function listReviewItems(params: { status?: string; page?: number; page_size?: number }) {
+  const resp = await client.get('/admin/review/list', { params: { ...params, role: 'admin' } });
+  return unwrap<{ total: number; items: import('../types').ReviewItem[] }>(resp);
+}
+
+export async function approveReviewWord(word: string, creator: string) {
+  const resp = await client.post('/admin/review/approve', { role: 'admin', word, creator });
+  return unwrap<null>(resp);
+}
+
+export async function rejectReviewWord(word: string, creator: string) {
+  const resp = await client.post('/admin/review/reject', { role: 'admin', word, creator });
+  return unwrap<null>(resp);
+}
+
+// ============ Admin: User Management ============
+export async function adminDisableUser(username: string) {
+  const resp = await client.post('/admin/user/disable', { role: 'admin', username });
+  return unwrap<null>(resp);
+}
+
+export async function adminEnableUser(username: string) {
+  const resp = await client.post('/admin/user/enable', { role: 'admin', username });
+  return unwrap<null>(resp);
+}
+
+export async function adminResetPassword(username: string, new_password = '123456') {
+  const resp = await client.post('/admin/user/reset_password', { role: 'admin', username, new_password });
+  return unwrap<null>(resp);
+}
+
+export async function adminGetUserProfile(username: string) {
+  const resp = await client.get('/admin/user/profile', { params: { role: 'admin', username } });
+  return unwrap<import('../types').UserProfile>(resp);
+}
+
+// ============ Admin: Game Records ============
+export async function adminListGameRecords(params: { page?: number; page_size?: number }) {
+  const resp = await client.get('/admin/game_records', { params: { ...params, role: 'admin' } });
+  return unwrap<{ total: number; items: import('../types').GameRecordItem[] }>(resp);
+}
+
+export async function adminDeleteGameRecord(username: string, game_time: string) {
+  const resp = await client.post('/admin/game_records/delete', { role: 'admin', username, game_time });
+  return unwrap<null>(resp);
+}
+
+// ============ Admin: System Config ============
+export async function adminGetConfig() {
+  const resp = await client.get('/admin/config', { params: { role: 'admin' } });
+  return unwrap<import('../types').SystemConfig>(resp);
+}
+
+export async function adminUpdateConfig(cfg: Partial<import('../types').SystemConfig>) {
+  const resp = await client.post('/admin/config', { role: 'admin', ...cfg });
+  return unwrap<null>(resp);
+}
+
 export async function updateUser(id: string, payload: { name?: string; avatar?: string; email?: string }) {
   const resp = await client.post('/user/update', { id, ...payload }).catch(() => null);
   if (!resp) return Promise.resolve(null);
@@ -332,9 +529,51 @@ export async function submitAnswer(id: string, answer: string) : Promise<SubmitA
   }
 }
 
-export async function validateGameWord(prev: string, word: string) {
-  const valid = word && word.length >= 4 && prev && word.charAt(0).toLowerCase() === prev.charAt(prev.length - 1).toLowerCase();
-  return { valid, score: valid ? 500 : 0, reason: valid ? undefined : '首字母或长度不符合规则' } as any;
+export type WordBank = 'global' | 'personal' | 'cet4' | 'cet6';
+
+export async function validateGameWord(prev: string, word: string, wordBank: WordBank = 'global', personalWords?: string[]) {
+  if (!word || word.length < 4) {
+    return { valid: false, score: 0, reason: '单词长度至少 4 个字符' };
+  }
+  if (!prev || word.charAt(0).toLowerCase() !== prev.charAt(prev.length - 1).toLowerCase()) {
+    return { valid: false, score: 0, reason: '首字母与上一个单词末尾字母不一致' };
+  }
+
+  if (wordBank === 'personal') {
+    if (personalWords && personalWords.some(w => w.toLowerCase() === word.toLowerCase())) {
+      return { valid: true, score: 500, inDictionary: true };
+    }
+    return { valid: false, score: 0, reason: `"${word}" 不在你的个人词库中` };
+  }
+
+  if (wordBank === 'cet4' || wordBank === 'cet6') {
+    try {
+      const results = await searchDictionary(word, wordBank);
+      if (results.length > 0) {
+        return { valid: true, score: 500, inDictionary: true };
+      }
+      return { valid: false, score: 0, reason: `"${word}" 不在${wordBank === 'cet4' ? '四级' : '六级'}词库中` };
+    } catch {
+      return { valid: false, score: 0, reason: '词典服务不可用，请稍后再试' };
+    }
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      return { valid: true, score: 700, reason: undefined, inDictionary: true };
+    }
+
+    return { valid: false, score: 0, reason: `"${word}" 不是有效单词` };
+  } catch {
+    return { valid: true, score: 500, reason: undefined, inDictionary: false, warning: '词典服务不可用，仅校验基本规则' };
+  }
 }
 
 export async function getUsers() : Promise<ApiUser[]> {
