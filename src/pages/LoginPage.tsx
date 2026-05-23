@@ -135,35 +135,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
             <form className="space-y-8" onSubmit={handleSubmit}>
               {/* Role Selection */}
+              {isRegistering ? (
+                <div className="bg-surface-container-low p-4 rounded-xl text-center text-sm text-outline">
+                  <UserIcon className="w-5 h-5 inline mr-1 text-primary" />
+                  注册身份：<span className="font-bold text-primary">学习者</span>
+                  <p className="text-xs mt-1 text-outline/60">如需管理员权限，请联系现有管理员提升</p>
+                </div>
+              ) : (
               <div className="space-y-3">
-                <label className="font-headline text-sm font-bold text-primary uppercase tracking-widest">
-                  {isRegistering ? "选择身份" : "访问模式"}
-                </label>
+                <label className="font-headline text-sm font-bold text-primary uppercase tracking-widest">访问模式</label>
                 <div className="grid grid-cols-2 bg-surface-container-low p-1 rounded-xl">
-                  <button 
-                    type="button"
-                    onClick={() => setRole('student')}
-                    className={cn(
-                      "flex items-center justify-center gap-2 py-3 rounded-lg transition-all font-bold",
-                      role === 'student' ? "bg-white shadow-sm text-primary" : "text-on-surface-variant hover:text-on-surface"
-                    )}
-                  >
-                    <UserIcon className="w-5 h-5" />
-                    学习者
+                  <button type="button" onClick={() => setRole('student')} className={cn("flex items-center justify-center gap-2 py-3 rounded-lg transition-all font-bold", role === 'student' ? "bg-white shadow-sm text-primary" : "text-on-surface-variant hover:text-on-surface")}>
+                    <UserIcon className="w-5 h-5" />学习者
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => setRole('admin')}
-                    className={cn(
-                      "flex items-center justify-center gap-2 py-3 rounded-lg transition-all font-bold",
-                      role === 'admin' ? "bg-white shadow-sm text-primary" : "text-on-surface-variant hover:text-on-surface"
-                    )}
-                  >
-                    <ShieldCheck className="w-5 h-5" />
-                    管理员
+                  <button type="button" onClick={() => setRole('admin')} className={cn("flex items-center justify-center gap-2 py-3 rounded-lg transition-all font-bold", role === 'admin' ? "bg-white shadow-sm text-primary" : "text-on-surface-variant hover:text-on-surface")}>
+                    <ShieldCheck className="w-5 h-5" />管理员
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Input Fields */}
               <div className="space-y-6">
@@ -322,9 +312,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   {!loading && <ArrowRight className="w-4 h-4" />}
                 </button>
 
-                <p className="text-center text-xs text-outline">
-                  {!isRegistering && "默认账号: admin/admin123 或 student/123456"}
-                </p>
               </div>
             </form>
 

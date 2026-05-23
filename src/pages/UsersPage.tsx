@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Shield, User, Ban, CheckCircle, Key, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Shield, User, Ban, CheckCircle, Key, Eye, X, ChevronLeft, ChevronRight, ShieldOff } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { adminListUsers, adminDisableUser, adminEnableUser, adminResetPassword, adminGetUserProfile, type ApiUser } from '../lib/api';
+import { adminListUsers, adminDisableUser, adminEnableUser, adminResetPassword, adminGetUserProfile, adminSetRole, type ApiUser } from '../lib/api';
 import type { UserProfile } from '../types';
 
 export const UsersPage: React.FC = () => {
@@ -43,10 +43,10 @@ export const UsersPage: React.FC = () => {
   };
 
   const handleResetPwd = async (username: string) => {
-    if (!confirm(`确定要重置用户 "${username}" 的密码为 123456 吗？`)) return;
+    if (!confirm(`确定要重置用户 "${username}" 的密码吗？`)) return;
     try {
-      await adminResetPassword(username);
-      alert('密码已重置为 123456');
+      const result = await adminResetPassword(username);
+      alert(`密码已重置为: ${result.new_password || '随机密码'}`);
     } catch (e: any) {
       alert('重置失败: ' + (e.message || ''));
     }
@@ -58,6 +58,18 @@ export const UsersPage: React.FC = () => {
       setSelectedProfile(profile);
     } catch (e: any) {
       alert('获取失败: ' + (e.message || ''));
+    }
+  };
+
+  const handleSetRole = async (username: string, currentRole: string) => {
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    const action = newRole === 'admin' ? '提升为管理员' : '降级为普通用户';
+    if (!confirm(`确定要将 "${username}" ${action}吗？`)) return;
+    try {
+      await adminSetRole(username, newRole);
+      loadUsers();
+    } catch (e: any) {
+      alert('操作失败: ' + (e.message || ''));
     }
   };
 
@@ -119,6 +131,9 @@ export const UsersPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex gap-2">
+                      <button onClick={() => handleSetRole(u.username, u.role)} className={cn("p-2 rounded-lg transition-colors", u.role === 'admin' ? "text-amber-600 hover:bg-amber-50" : "text-sky-600 hover:bg-sky-50")} title={u.role === 'admin' ? '降级为普通用户' : '提升为管理员'}>
+                        {u.role === 'admin' ? <ShieldOff className="w-4 h-4" /> : <Shield className="w-4 h-4" />}
+                      </button>
                       <button onClick={() => handleToggle(u.username, u.disabled)} className={cn("p-2 rounded-lg transition-colors", u.disabled ? "text-secondary hover:bg-secondary/10" : "text-error hover:bg-error/10")} title={u.disabled ? '启用' : '禁用'}>
                         {u.disabled ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
                       </button>

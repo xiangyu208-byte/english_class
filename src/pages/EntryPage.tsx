@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Upload, Edit2, Trash2, BarChart3, CloudUpload, BookOpen, Search, X, Save, FileText, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, Edit2, Trash2, BarChart3, CloudUpload, BookOpen, Search, X, Save, FileText, Download, CheckCircle2, AlertCircle, Loader2, ShieldCheck, ShieldX, Layers } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { addWord, deleteWord, listWords, updateWord, importWords, type ApiWord } from '../lib/api';
+import { addWord, deleteWord, listWords, updateWord, importWords, type ApiWord, listCustomBanks, addWordToCustomBank } from '../lib/api';
 import { User } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -19,6 +19,11 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
   const [totalCount, setTotalCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [wordValid, setWordValid] = useState<boolean | null>(null);
+  const [validating, setValidating] = useState(false);
+  const validateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [customBanks, setCustomBanks] = useState<{ name: string; creator: string }[]>([]);
+  const [selectedBank, setSelectedBank] = useState('personal');
 
   // 词库弹窗状态
   const [showLibrary, setShowLibrary] = useState(false);
@@ -37,7 +42,32 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
 
   useEffect(() => {
     loadWords();
+    (async () => { try { setCustomBanks(await listCustomBanks()); } catch {} })();
   }, []);
+
+  const validateWord = (word: string) => {
+    if (validateTimer.current) clearTimeout(validateTimer.current);
+    if (!word.trim() || word.trim().length < 2) {
+      setWordValid(null);
+      setValidating(false);
+      return;
+    }
+    setValidating(true);
+    setWordValid(null);
+    validateTimer.current = setTimeout(async () => {
+      try {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5000);
+        const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.trim())}`, { signal: ctrl.signal });
+        clearTimeout(timeout);
+        setWordValid(resp.ok);
+      } catch {
+        setWordValid(null);
+      } finally {
+        setValidating(false);
+      }
+    }, 600);
+  };
 
   const loadWords = async () => {
     try {
@@ -58,20 +88,22 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
 
     setSaving(true);
     try {
-      const payload = {
-        word: english.trim(),
-        meaning: chinese.trim(),
-        example: example.trim(),
-        pos: '',
-        origin: '',
-        creator: user?.username || user?.id || '',
-        status: '进行中'
-      };
-      await addWord(payload as any);
-      setEnglish('');
-      setChinese('');
-      setExample('');
-      setMessage(isStudent ? '单词已提交，等待管理员审核...' : '单词已成功保存到圣殿！');
+      if (selectedBank === 'personal') {
+        const payload = {
+          word: english.trim(),
+          meaning: chinese.trim(),
+          example: example.trim(),
+          pos: '',
+          origin: '',
+          creator: user?.username || user?.id || '',
+          status: '进行中'
+        };
+        await addWord(payload as any);
+        setMessage(isStudent ? '单词已提交，等待管理员审核...' : '单词已成功保存到圣殿！');
+      } else {
+        await addWordToCustomBank(selectedBank, english.trim(), chinese.trim(), example.trim());
+        setMessage('单词已添加到自定义词库');
+      }
       const newWord: ApiWord = { id: english.trim(), english: english.trim(), chinese: chinese.trim(), example: example.trim(), status: isStudent ? '待审核' : '进行中', letter: english.trim().charAt(0).toUpperCase(), createdBy: user?.username || user?.id || '' };
       setRecentWords(prev => [newWord, ...prev].slice(0, 4));
       setTotalCount(prev => prev + 1);
@@ -280,9 +312,50 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
           )}
 
           <div className="space-y-6">
+            {customBanks.length > 0 && (
+              <div className="space-y-1">
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">目标词库</label>
+                <div className="flex gap-2 flex-wrap">
+                  {[{ value: 'personal', label: '个人词库' }, ...customBanks.map(b => ({ value: b.name, label: b.name }))].map(b => (
+                    <button
+                      key={b.value}
+                      onClick={() => setSelectedBank(b.value)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                        selectedBank === b.value
+                          ? 'bg-primary text-white shadow-md'
+                          : 'bg-surface-container-highest text-outline hover:bg-surface-container-high'
+                      }`}
+                    >
+                      <Layers className="w-3 h-3 inline mr-1" />
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">英文单词</label>
-              <input className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 transition-all" placeholder="例如：Ephemeral" type="text" value={english} onChange={(e) => setEnglish(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }} required />
+              <div className="relative">
+                <input className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 pr-12 focus:ring-2 focus:ring-primary/20 transition-all" placeholder="例如：Ephemeral" type="text" value={english} onChange={(e) => { setEnglish(e.target.value); validateWord(e.target.value); }} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }} required />
+                {validating && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="w-5 h-5 text-outline animate-spin" />
+                  </div>
+                )}
+                {!validating && wordValid === true && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                )}
+                {!validating && wordValid === false && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-error">
+                    <ShieldX className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+              {wordValid === false && (
+                <p className="text-xs text-error font-bold mt-1 ml-1">该单词不存在于词典中，请检查拼写</p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">中文释义</label>
@@ -293,7 +366,7 @@ export const EntryPage: React.FC<EntryPageProps> = ({ user }) => {
               <textarea className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 transition-all resize-none" placeholder="此单词在高端社论语境下如何使用？" rows={4} value={example} onChange={(e) => setExample(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}></textarea>
             </div>
             <div className="flex justify-end pt-4">
-              <button onClick={handleSubmit} className="bg-primary text-white px-10 py-3 rounded-full font-bold hover:shadow-xl transition-all shadow-md disabled:opacity-50" disabled={saving}>
+              <button onClick={handleSubmit} className="bg-primary text-white px-10 py-3 rounded-full font-bold hover:shadow-xl transition-all shadow-md disabled:opacity-50" disabled={saving || wordValid === false || !english.trim()}>
                 {saving ? '保存中...' : '保存到圣殿'}
               </button>
             </div>

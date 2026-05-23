@@ -131,10 +131,11 @@ export interface ApiUser {
 export interface DashboardStats {
   recentWords?: ApiWord[];
   wordOfDay?: ApiWord | null;
-  userStats?: { accuracy?: number; masteredCount?: number; streak?: number };
+  userStats?: UserStats;
   totalWords?: number;
   totalTests?: number;
   globalAccuracy?: number;
+  daily_tests?: number[];
 }
 
 export interface RandomWordResponse {
@@ -154,6 +155,7 @@ export interface UserStats {
   masteredCount?: number;
   totalTests?: number;
   streak?: number;
+  daily_tests?: number[];
 }
 
 const STORAGE_KEY = 'lexical_current_user_id';
@@ -246,6 +248,58 @@ export async function getRecords(username?: string) {
   return unwrap<TestRecord[]>(resp);
 }
 
+// ============ 错词本 ============
+export async function addMistake(username: string, word: string, meaning: string) {
+  const resp = await client.post('/mistake/add', { username, word, meaning });
+  return unwrap<null>(resp);
+}
+
+export async function listMistakes(username: string) {
+  const resp = await client.get('/mistake/list', { params: { username } });
+  return unwrap<{ word: string; meaning: string; wrong_count: number; correct_count: number }[]>(resp);
+}
+
+export async function removeMistake(username: string, word: string) {
+  const resp = await client.post('/mistake/remove', { username, word });
+  return unwrap<null>(resp);
+}
+
+// ============ Custom Banks (自定义词库) ============
+export async function createCustomBank(name: string, creator: string) {
+  const resp = await client.post('/custom_bank/create', { name, creator });
+  return unwrap<null>(resp);
+}
+
+export async function listCustomBanks() {
+  const resp = await client.get('/custom_bank/list');
+  return unwrap<{ name: string; creator: string }[]>(resp);
+}
+
+export async function deleteCustomBank(name: string) {
+  const resp = await client.post('/custom_bank/delete', { name });
+  return unwrap<null>(resp);
+}
+
+export async function addWordToCustomBank(bank: string, word: string, meaning: string, example: string) {
+  const resp = await client.post('/custom_bank/add_word', { bank, word, meaning, example });
+  return unwrap<null>(resp);
+}
+
+export async function listCustomBankWords(bank: string) {
+  const resp = await client.get('/custom_bank/words', { params: { bank } });
+  return unwrap<{ word: string; meaning: string; example: string }[]>(resp);
+}
+
+export async function removeWordFromCustomBank(bank: string, word: string) {
+  const resp = await client.post('/custom_bank/remove_word', { bank, word });
+  return unwrap<null>(resp);
+}
+
+export async function addWordsToCustomBank(bank: string, words: { word: string; meaning: string; example: string }[]) {
+  const resp = await client.post('/custom_bank/add_words', { bank, words });
+  return unwrap<{ added: number; total: number }>(resp);
+}
+
 // ============ 接龙游戏 ============
 export async function startGame(username: string, time_limit = 60) {
   const resp = await client.post('/game/start', { username, time_limit });
@@ -263,6 +317,11 @@ export async function getStats(username: string) {
   return unwrap<any>(resp);
 }
 
+export async function getDailyWord() {
+  const resp = await client.get('/daily_word');
+  return unwrap<{ word: string; meaning: string; source: string; example: string; frequency: string }>(resp);
+}
+
 function pickWordOfDay(words: WordItem[]): WordItem | null {
   if (words.length === 0) return null;
   const today = new Date();
@@ -277,6 +336,7 @@ function pickWordOfDay(words: WordItem[]): WordItem | null {
 
 export async function getDashboardStats(roleOrUser?: string) : Promise<DashboardStats> {
   let s: any = {};
+  let dailyWord: any = null;
   try {
     const username = roleOrUser || '';
     if (username) {
@@ -285,10 +345,12 @@ export async function getDashboardStats(roleOrUser?: string) : Promise<Dashboard
         const words = await listWords(username, false).catch(() => [] as WordItem[]);
         s.recentWords = (words || []).slice(0, 6);
         s.totalWords = (words || []).length;
-        s.wordOfDay = pickWordOfDay(words || []);
       } catch (e) {
         // ignore
       }
+      try {
+        dailyWord = await getDailyWord().catch(() => null);
+      } catch {}
     }
   } catch (err) {
     console.warn('getDashboardStats: getStats failed, returning empty stats', err);
@@ -296,7 +358,7 @@ export async function getDashboardStats(roleOrUser?: string) : Promise<Dashboard
   }
   const stats: DashboardStats = {
     recentWords: (s.recentWords || []).map((w: any) => mapWordItem(w)),
-    wordOfDay: s.wordOfDay ? mapWordItem(s.wordOfDay) : null,
+    wordOfDay: dailyWord ? { id: dailyWord.word, english: dailyWord.word, chinese: dailyWord.meaning, example: dailyWord.example, letter: dailyWord.word?.[0]?.toUpperCase() } : null,
     userStats: {
       accuracy: (s.accuracy ?? 0) * 100,
       masteredCount: s.masteredCount ?? 0,
@@ -305,6 +367,7 @@ export async function getDashboardStats(roleOrUser?: string) : Promise<Dashboard
     totalWords: s.totalWords ?? 0,
     totalTests: s.total_tests ?? s.totalTests ?? 0,
     globalAccuracy: s.globalAccuracy ?? (s.accuracy ?? 0) * 100,
+    daily_tests: s.daily_tests,
   };
   return stats;
 }
@@ -474,8 +537,13 @@ export async function adminEnableUser(username: string) {
   return unwrap<null>(resp);
 }
 
-export async function adminResetPassword(username: string, new_password = '123456') {
+export async function adminResetPassword(username: string, new_password?: string) {
   const resp = await client.post('/admin/user/reset_password', { role: 'admin', username, new_password });
+  return unwrap<{ new_password: string }>(resp);
+}
+
+export async function adminSetRole(username: string, new_role: 'admin' | 'user') {
+  const resp = await client.post('/admin/user/set_role', { role: 'admin', username, new_role });
   return unwrap<null>(resp);
 }
 
@@ -583,7 +651,7 @@ export async function getUsers() : Promise<ApiUser[]> {
 
 export async function getUserStats(username?: string) : Promise<UserStats> {
   const s = await getStats(username || '');
-  return { accuracy: s.accuracy ?? 0, masteredCount: s.masteredCount ?? 0, totalTests: s.totalTests ?? 0, streak: s.streak ?? 0 };
+  return { accuracy: s.accuracy ?? 0, masteredCount: s.masteredCount ?? 0, totalTests: s.totalTests ?? 0, streak: s.streak ?? 0, daily_tests: s.daily_tests };
 }
 
 export default client;

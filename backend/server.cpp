@@ -13,6 +13,8 @@
 #include <unordered_set>
 #include <ctime>
 #include <unordered_map>
+#include <iomanip>
+#include <cstdint>
 
 using json = nlohmann::json;
 using namespace httplib;
@@ -30,6 +32,9 @@ static const std::string POSTS_CSV = DATA_DIR + "/posts.csv";
 static const std::string COMMENTS_CSV = DATA_DIR + "/comments.csv";
 static const std::string LIKES_CSV = DATA_DIR + "/likes.csv";
 static const std::string FRIENDS_CSV = DATA_DIR + "/friends.csv";
+static const std::string MISTAKES_CSV = DATA_DIR + "/mistakes.csv";
+static const std::string CUSTOM_BANKS_CSV = DATA_DIR + "/custom_banks.csv";
+static const std::string CUSTOM_BANK_WORDS_CSV = DATA_DIR + "/custom_bank_words.csv";
 static std::mutex file_mutex;
 
 // Utility: ensure data directory and files exist
@@ -51,6 +56,9 @@ void ensure_data_files() {
     ensure(COMMENTS_CSV);
     ensure(LIKES_CSV);
     ensure(FRIENDS_CSV);
+    ensure(MISTAKES_CSV);
+    ensure(CUSTOM_BANKS_CSV);
+    ensure(CUSTOM_BANK_WORDS_CSV);
 }
 
 // CSV helper: parse line into fields (handles quoted fields)
@@ -121,6 +129,57 @@ bool append_line(const std::string &path, const std::string &line) {
     if (!ofs) return false;
     ofs << line << '\n';
     return true;
+}
+
+// ============ Password hashing ============
+std::string gen_salt() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 15);
+    const char hex[] = "0123456789abcdef";
+    std::string salt;
+    for (int i = 0; i < 16; ++i) salt += hex[dis(gen)];
+    return salt;
+}
+
+std::string hash_password(const std::string &password, const std::string &salt) {
+    std::string data = salt + password;
+    auto fnv64 = [](const std::string &s) -> uint64_t {
+        uint64_t h = 14695981039346656037ULL;
+        for (char c : s) { h ^= (unsigned char)c; h *= 1099511628211ULL; }
+        return h;
+    };
+    uint64_t h = fnv64(data);
+    for (int round = 0; round < 5000; ++round) {
+        h = fnv64(std::to_string(h) + data + std::to_string(round));
+    }
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0') << std::setw(16) << h;
+    return ss.str();
+}
+
+std::string make_hashed_password(const std::string &password) {
+    std::string salt = gen_salt();
+    return salt + "$" + hash_password(password, salt);
+}
+
+bool verify_password(const std::string &password, const std::string &stored) {
+    size_t pos = stored.find('$');
+    if (pos == std::string::npos) {
+        return password == stored; // plaintext (legacy)
+    }
+    std::string salt = stored.substr(0, pos);
+    return stored == salt + "$" + hash_password(password, salt);
+}
+
+std::string gen_random_password() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 61);
+    const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    std::string pw;
+    for (int i = 0; i < 10; ++i) pw += chars[dis(gen)];
+    return pw;
 }
 
 // User helpers
@@ -285,6 +344,9 @@ bool add_word(const Word &w) {
 }
 
 // Append a test record and update user stats
+// Forward decl
+void handle_mistake_correct(const std::string &username, const std::string &word);
+
 bool record_test(const std::string &username, const std::string &test_word, int result, double time_used, int skipped) {
     std::vector<std::string> fields = {username, test_word, std::to_string(result), std::to_string(time_used), std::to_string(skipped), std::to_string((long long)std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()))};
     std::string line;
@@ -297,9 +359,11 @@ bool record_test(const std::string &username, const std::string &test_word, int 
     if (!uopt) return true;
     User u = *uopt;
     u.total_tests += 1;
-    if (result == 1) u.correct += 1;
+    if (result == 1) {
+        u.correct += 1;
+        handle_mistake_correct(username, test_word);
+    }
     u.accuracy = (u.total_tests > 0) ? (double)u.correct / u.total_tests : 0.0;
-    // update streak: naive increment on correct, reset on incorrect
     if (result == 1) u.streak += 1; else u.streak = 0;
     return upsert_user(u);
 }
@@ -497,6 +561,14 @@ bool set_user_disabled(const std::string &username, bool disabled) {
     if (!uopt) return false;
     User u = *uopt;
     u.disabled = disabled;
+    return upsert_user(u);
+}
+
+bool set_user_role(const std::string &username, const std::string &role) {
+    auto uopt = find_user(username);
+    if (!uopt) return false;
+    User u = *uopt;
+    u.role = role;
     return upsert_user(u);
 }
 
@@ -892,8 +964,201 @@ json get_friend_requests(const std::string &username) {
     return arr;
 }
 
+// ============ Mistakes helpers ============
+struct MistakeWord {
+    std::string username, word, meaning;
+    int wrong_count = 0, correct_count = 0;
+};
+
+std::vector<MistakeWord> read_mistakes(const std::string &username = "") {
+    std::vector<MistakeWord> out;
+    auto lines = read_all_lines(MISTAKES_CSV);
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() < 5) continue;
+        if (!username.empty() && f[0] != username) continue;
+        MistakeWord m;
+        m.username = f[0]; m.word = f[1]; m.meaning = f[2];
+        m.wrong_count = std::stoi(f[3]); m.correct_count = std::stoi(f[4]);
+        out.push_back(m);
+    }
+    return out;
+}
+
+bool add_or_update_mistake(const std::string &username, const std::string &word, const std::string &meaning) {
+    auto lines = read_all_lines(MISTAKES_CSV);
+    bool found = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 5 && f[0] == username && f[1] == word) {
+            f[3] = std::to_string(std::stoi(f[3]) + 1);
+            ln.clear();
+            for (size_t i = 0; i < f.size(); ++i) {
+                ln += escape_csv_field(f[i]);
+                if (i + 1 < f.size()) ln.push_back(',');
+            }
+            found = true;
+            break;
+        }
+    }
+    if (found) return write_all_lines(MISTAKES_CSV, lines);
+    std::vector<std::string> fields = {username, word, meaning, "1", "0"};
+    std::string new_ln;
+    for (size_t i = 0; i < fields.size(); ++i) {
+        new_ln += escape_csv_field(fields[i]);
+        if (i + 1 < fields.size()) new_ln.push_back(',');
+    }
+    return append_line(MISTAKES_CSV, new_ln);
+}
+
+bool remove_mistake(const std::string &username, const std::string &word) {
+    auto lines = read_all_lines(MISTAKES_CSV);
+    std::vector<std::string> out;
+    bool found = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 2 && f[0] == username && f[1] == word) { found = true; continue; }
+        out.push_back(ln);
+    }
+    if (!found) return false;
+    return write_all_lines(MISTAKES_CSV, out);
+}
+
+void handle_mistake_correct(const std::string &username, const std::string &word) {
+    auto lines = read_all_lines(MISTAKES_CSV);
+    bool changed = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 5 && f[0] == username && f[1] == word) {
+            int cc = std::stoi(f[4]) + 1;
+            if (cc >= 3) { changed = true; ln = ""; continue; }
+            f[4] = std::to_string(cc);
+            ln.clear();
+            for (size_t i = 0; i < f.size(); ++i) {
+                ln += escape_csv_field(f[i]);
+                if (i + 1 < f.size()) ln.push_back(',');
+            }
+            changed = true;
+            break;
+        }
+    }
+    if (!changed) return;
+    std::vector<std::string> out;
+    for (auto &ln : lines) { if (!ln.empty()) out.push_back(ln); }
+    write_all_lines(MISTAKES_CSV, out);
+}
+
+// ============ Custom Banks helpers ============
+struct CustomBank {
+    std::string name, creator;
+};
+
+std::vector<CustomBank> read_custom_banks() {
+    std::vector<CustomBank> out;
+    auto lines = read_all_lines(CUSTOM_BANKS_CSV);
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() < 2) continue;
+        out.push_back({f[0], f[1]});
+    }
+    return out;
+}
+
+bool create_custom_bank(const std::string &name, const std::string &creator) {
+    auto banks = read_custom_banks();
+    for (auto &b : banks) {
+        if (b.name == name) return false;
+    }
+    std::string ln = escape_csv_field(name) + "," + escape_csv_field(creator);
+    return append_line(CUSTOM_BANKS_CSV, ln);
+}
+
+bool delete_custom_bank(const std::string &name) {
+    auto lines = read_all_lines(CUSTOM_BANKS_CSV);
+    std::vector<std::string> out;
+    bool found = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 1 && f[0] == name) { found = true; continue; }
+        out.push_back(ln);
+    }
+    if (!found) return false;
+    write_all_lines(CUSTOM_BANKS_CSV, out);
+    auto wlines = read_all_lines(CUSTOM_BANK_WORDS_CSV);
+    std::vector<std::string> wout;
+    for (auto &ln : wlines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 1 && f[0] == name) continue;
+        wout.push_back(ln);
+    }
+    write_all_lines(CUSTOM_BANK_WORDS_CSV, wout);
+    return true;
+}
+
+bool add_word_to_custom_bank(const std::string &bank_name, const std::string &word, const std::string &meaning, const std::string &example) {
+    auto lines = read_all_lines(CUSTOM_BANK_WORDS_CSV);
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 2 && f[0] == bank_name && f[1] == word) return false;
+    }
+    std::vector<std::string> fields = {bank_name, word, meaning, example};
+    std::string new_ln;
+    for (size_t i = 0; i < fields.size(); ++i) {
+        new_ln += escape_csv_field(fields[i]);
+        if (i + 1 < fields.size()) new_ln.push_back(',');
+    }
+    return append_line(CUSTOM_BANK_WORDS_CSV, new_ln);
+}
+
+json read_custom_bank_words(const std::string &bank_name) {
+    json arr = json::array();
+    auto lines = read_all_lines(CUSTOM_BANK_WORDS_CSV);
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() < 3 || f[0] != bank_name) continue;
+        arr.push_back({{"word", f[1]}, {"meaning", f[2]}, {"example", f.size() > 3 ? f[3] : ""}});
+    }
+    return arr;
+}
+
+bool remove_word_from_custom_bank(const std::string &bank_name, const std::string &word) {
+    auto lines = read_all_lines(CUSTOM_BANK_WORDS_CSV);
+    std::vector<std::string> out;
+    bool found = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() >= 2 && f[0] == bank_name && f[1] == word) { found = true; continue; }
+        out.push_back(ln);
+    }
+    if (!found) return false;
+    return write_all_lines(CUSTOM_BANK_WORDS_CSV, out);
+}
+
+void migrate_plaintext_passwords() {
+    auto lines = read_all_lines(USERS_CSV);
+    bool changed = false;
+    for (auto &ln : lines) {
+        auto f = parse_csv_line(ln);
+        if (f.size() < 2) continue;
+        if (f[1].find('$') == std::string::npos) {
+            f[1] = make_hashed_password(f[1]);
+            ln.clear();
+            for (size_t i = 0; i < f.size(); ++i) {
+                ln += escape_csv_field(f[i]);
+                if (i + 1 < f.size()) ln.push_back(',');
+            }
+            changed = true;
+        }
+    }
+    if (changed) {
+        write_all_lines(USERS_CSV, lines);
+        printf("Migrated plaintext passwords to hashed format.\n");
+    }
+}
+
 int main() {
     ensure_data_files();
+    migrate_plaintext_passwords();
 
     Server svr;
 
@@ -927,7 +1192,7 @@ int main() {
                 res.set_content(make_resp(500, "用户名或密码为空"), "application/json"); return;
             }
             if (find_user(username)) { res.set_content(make_resp(500, "用户名已存在"), "application/json"); return; }
-            User u; u.username = username; u.password = password; u.role = role; u.total_tests=0; u.correct=0; u.accuracy=0.0; u.streak=0;
+            User u; u.username = username; u.password = make_hashed_password(password); u.role = "user"; u.total_tests=0; u.correct=0; u.accuracy=0.0; u.streak=0;
             if (!upsert_user(u)) { res.set_content(make_resp(500, "写入用户失败"), "application/json"); return; }
             res.set_content(make_resp(200, "注册成功", { {"username", username}, {"role", role} }), "application/json");
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
@@ -944,7 +1209,11 @@ int main() {
             if (!uopt) { res.set_content(make_resp(500, "用户不存在"), "application/json"); return; }
             User u = *uopt;
             if (u.disabled) { res.set_content(make_resp(500, "账号已被禁用"), "application/json"); return; }
-            if (u.password != password) { res.set_content(make_resp(500, "密码错误"), "application/json"); return; }
+            if (!verify_password(password, u.password)) { res.set_content(make_resp(500, "密码错误"), "application/json"); return; }
+            if (u.password.find('$') == std::string::npos) {
+                u.password = make_hashed_password(password);
+                upsert_user(u);
+            }
             json data = { {"username", u.username}, {"role", u.role}, {"total_tests", u.total_tests}, {"correct", u.correct}, {"accuracy", u.accuracy}, {"streak", u.streak} };
             res.set_content(make_resp(200, "登录成功", data), "application/json");
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
@@ -961,8 +1230,8 @@ int main() {
             auto uopt = find_user(username);
             if (!uopt) { res.set_content(make_resp(500, "用户不存在"), "application/json"); return; }
             User u = *uopt;
-            if (u.password != oldp) { res.set_content(make_resp(500, "旧密码错误"), "application/json"); return; }
-            u.password = newp;
+            if (!verify_password(oldp, u.password)) { res.set_content(make_resp(500, "旧密码错误"), "application/json"); return; }
+            u.password = make_hashed_password(newp);
             if (!upsert_user(u)) { res.set_content(make_resp(500, "保存失败"), "application/json"); return; }
             res.set_content(make_resp(200, "修改成功"), "application/json");
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
@@ -1127,6 +1396,40 @@ int main() {
             if (source == "personal") {
                 auto words = random_words_for_user(username, count);
                 for (auto &w : words) arr.push_back({{"word", w.word}, {"meaning", w.meaning}, {"example", w.example}, {"pos", w.pos}, {"source", "personal"}});
+            } else if (source == "mistakes") {
+                auto mistakes = read_mistakes(username);
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(mistakes.begin(), mistakes.end(), g);
+                if ((int)mistakes.size() > count) mistakes.resize(count);
+                for (auto &m : mistakes) arr.push_back({{"word", m.word}, {"meaning", m.meaning}, {"example", ""}, {"source", "mistakes"}});
+            } else if (source == "global") {
+                auto dict = read_dictionary();
+                if (!letter.empty()) {
+                    std::vector<DictEntry> filtered;
+                    for (auto &d : dict) {
+                        if (!d.word.empty() && std::tolower(d.word[0]) == std::tolower(letter[0]))
+                            filtered.push_back(d);
+                    }
+                    dict = filtered;
+                }
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(dict.begin(), dict.end(), g);
+                if ((int)dict.size() > count) dict.resize(count);
+                for (auto &d : dict) arr.push_back({{"word", d.word}, {"meaning", d.meaning}, {"example", d.example}, {"source", d.source}});
+            } else if (source.rfind("custom:", 0) == 0) {
+                std::string bank_name = source.substr(7);
+                auto words = read_custom_bank_words(bank_name);
+                if (words.is_array()) {
+                    std::vector<json> vec;
+                    for (auto &w : words) vec.push_back(w);
+                    std::random_device rd;
+                    std::mt19937 g(rd());
+                    std::shuffle(vec.begin(), vec.end(), g);
+                    if ((int)vec.size() > count) vec.resize(count);
+                    for (auto &w : vec) arr.push_back(w);
+                }
             } else {
                 auto dict = read_dictionary(source);
                 if (!letter.empty()) {
@@ -1188,6 +1491,118 @@ int main() {
         res.set_content(make_resp(200, "ok", arr), "application/json");
     });
 
+    // ============ Mistakes (错词本) ============
+    svr.Post(R"(/api/mistake/add)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string username = j.value("username", "");
+            std::string word = j.value("word", "");
+            std::string meaning = j.value("meaning", "");
+            if (username.empty() || word.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!add_or_update_mistake(username, word, meaning)) { res.set_content(make_resp(500, "添加失败"), "application/json"); return; }
+            res.set_content(make_resp(200, "已加入错词本"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Get(R"(/api/mistake/list)", [&](const Request &req, Response &res){
+        std::string username = req.get_param_value("username");
+        if (username.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+        auto mistakes = read_mistakes(username);
+        json arr = json::array();
+        for (auto &m : mistakes) {
+            arr.push_back({{"word", m.word}, {"meaning", m.meaning}, {"wrong_count", m.wrong_count}, {"correct_count", m.correct_count}});
+        }
+        res.set_content(make_resp(200, "ok", arr), "application/json");
+    });
+
+    svr.Post(R"(/api/mistake/remove)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string username = j.value("username", "");
+            std::string word = j.value("word", "");
+            if (username.empty() || word.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!remove_mistake(username, word)) { res.set_content(make_resp(500, "单词不在错词本中"), "application/json"); return; }
+            res.set_content(make_resp(200, "已移除"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    // ============ Custom Banks (自定义词库) ============
+    svr.Post(R"(/api/custom_bank/create)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string name = j.value("name", "");
+            std::string creator = j.value("creator", "");
+            if (name.empty() || creator.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!create_custom_bank(name, creator)) { res.set_content(make_resp(500, "词库名已存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "创建成功"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Get(R"(/api/custom_bank/list)", [&](const Request &req, Response &res){
+        auto banks = read_custom_banks();
+        json arr = json::array();
+        for (auto &b : banks) arr.push_back({{"name", b.name}, {"creator", b.creator}});
+        res.set_content(make_resp(200, "ok", arr), "application/json");
+    });
+
+    svr.Post(R"(/api/custom_bank/delete)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string name = j.value("name", "");
+            if (name.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!delete_custom_bank(name)) { res.set_content(make_resp(500, "词库不存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "已删除"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Post(R"(/api/custom_bank/add_word)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string bank = j.value("bank", "");
+            std::string word = j.value("word", "");
+            std::string meaning = j.value("meaning", "");
+            std::string example = j.value("example", "");
+            if (bank.empty() || word.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!add_word_to_custom_bank(bank, word, meaning, example)) { res.set_content(make_resp(500, "单词已存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "添加成功"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Get(R"(/api/custom_bank/words)", [&](const Request &req, Response &res){
+        std::string bank = req.get_param_value("bank");
+        if (bank.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+        res.set_content(make_resp(200, "ok", read_custom_bank_words(bank)), "application/json");
+    });
+
+    svr.Post(R"(/api/custom_bank/remove_word)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string bank = j.value("bank", "");
+            std::string word = j.value("word", "");
+            if (bank.empty() || word.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!remove_word_from_custom_bank(bank, word)) { res.set_content(make_resp(500, "单词不存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "已移除"), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Post(R"(/api/custom_bank/add_words)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            std::string bank = j.value("bank", "");
+            auto words = j.value("words", json::array());
+            if (bank.empty() || !words.is_array()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            int added = 0;
+            for (auto &w : words) {
+                std::string word = w.value("word", "");
+                std::string meaning = w.value("meaning", "");
+                std::string example = w.value("example", "");
+                if (word.empty()) continue;
+                if (add_word_to_custom_bank(bank, word, meaning, example)) added++;
+            }
+            res.set_content(make_resp(200, "ok", {{"added", added}, {"total", words.size()}}), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
     // Game start: returns time and initial info (server side not maintaining sessions)
     svr.Post(R"(/api/game/start)", [&](const Request &req, Response &res){
         try {
@@ -1219,6 +1634,24 @@ int main() {
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
     });
 
+    // Daily word from global dictionary (deterministic by date)
+    svr.Get(R"(/api/daily_word)", [&](const Request &req, Response &res){
+        auto dict = read_dictionary();
+        if (dict.empty()) { res.set_content(make_resp(500, "词典为空"), "application/json"); return; }
+        auto now = std::chrono::system_clock::now();
+        auto now_time = std::chrono::system_clock::to_time_t(now);
+        auto tm = *std::localtime(&now_time);
+        char buf[16];
+        std::strftime(buf, sizeof(buf), "%Y%m%d", &tm);
+        std::string date_str(buf);
+        size_t hash = 0;
+        for (char c : date_str) { hash = hash * 31 + (unsigned char)c; }
+        int idx = (int)(hash % dict.size());
+        auto &d = dict[idx];
+        json data = {{"word", d.word}, {"meaning", d.meaning}, {"source", d.source}, {"example", d.example}, {"frequency", d.frequency}};
+        res.set_content(make_resp(200, "ok", data), "application/json");
+    });
+
     // Stats: aggregate for user
     svr.Get(R"(/api/stats)", [&](const Request &req, Response &res){
         std::string username = req.get_param_value("username");
@@ -1231,15 +1664,44 @@ int main() {
         double avg_time = 0.0;
         int cnt = 0;
         std::unordered_set<std::string> masteredWords;
+
+        auto now = std::chrono::system_clock::now();
+        auto now_time = std::chrono::system_clock::to_time_t(now);
+        auto now_tm = *std::localtime(&now_time);
+        char today_buf[16];
+        std::strftime(today_buf, sizeof(today_buf), "%Y%m%d", &now_tm);
+        std::string today_str(today_buf);
+
+        int daily_counts[7] = {0};
         for (auto &ln : lines) {
             auto f = parse_csv_line(ln);
             if (f.size() < 6) continue;
             if (f[0] != username) continue;
             ++cnt; avg_time += std::stod(f[3]); if (std::stoi(f[2])==0) ++errors;
             if (std::stoi(f[2]) == 1) masteredWords.insert(f[1]);
+
+            std::string ts = f[5];
+            if (!ts.empty()) {
+                long long ts_val = std::stoll(ts);
+                auto rec_time = (std::time_t)ts_val;
+                auto rec_tm = *std::localtime(&rec_time);
+                char rec_buf[16];
+                std::strftime(rec_buf, sizeof(rec_buf), "%Y%m%d", &rec_tm);
+                std::string rec_day(rec_buf);
+                if (rec_day == today_str) daily_counts[0]++;
+                else {
+                    auto diff = std::difftime(now_time, rec_time);
+                    int days_ago = (int)(diff / 86400);
+                    if (days_ago >= 1 && days_ago <= 6) daily_counts[days_ago]++;
+                }
+            }
         }
         if (cnt>0) avg_time /= cnt;
-        json data = { {"total_tests", u.total_tests}, {"correct", u.correct}, {"errors", errors}, {"accuracy", u.accuracy}, {"avg_time", avg_time}, {"streak", u.streak}, {"masteredCount", masteredWords.size()} };
+
+        json daily_arr = json::array();
+        for (int i = 6; i >= 0; --i) daily_arr.push_back(daily_counts[i]);
+
+        json data = { {"total_tests", u.total_tests}, {"correct", u.correct}, {"errors", errors}, {"accuracy", u.accuracy}, {"avg_time", avg_time}, {"streak", u.streak}, {"masteredCount", masteredWords.size()}, {"daily_tests", daily_arr} };
         res.set_content(make_resp(200, "ok", data), "application/json");
     });
 
@@ -1398,10 +1860,22 @@ int main() {
             auto j = json::parse(req.body);
             if (j.value("role", "") != "admin") { res.set_content(make_resp(500, "无权限"), "application/json"); return; }
             std::string username = j.value("username", "");
-            std::string new_password = j.value("new_password", "123456");
             if (username.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
-            if (!admin_reset_password(username, new_password)) { res.set_content(make_resp(500, "用户不存在"), "application/json"); return; }
-            res.set_content(make_resp(200, "密码已重置"), "application/json");
+            std::string new_password = gen_random_password();
+            if (!admin_reset_password(username, make_hashed_password(new_password))) { res.set_content(make_resp(500, "用户不存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "密码已重置", {{"new_password", new_password}}), "application/json");
+        } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
+    });
+
+    svr.Post(R"(/api/admin/user/set_role)", [&](const Request &req, Response &res){
+        try {
+            auto j = json::parse(req.body);
+            if (j.value("role", "") != "admin") { res.set_content(make_resp(500, "无权限"), "application/json"); return; }
+            std::string username = j.value("username", "");
+            std::string new_role = j.value("new_role", "user");
+            if (username.empty()) { res.set_content(make_resp(500, "参数缺失"), "application/json"); return; }
+            if (!set_user_role(username, new_role)) { res.set_content(make_resp(500, "用户不存在"), "application/json"); return; }
+            res.set_content(make_resp(200, "角色已更新"), "application/json");
         } catch (...) { res.set_content(make_resp(500, "参数解析失败"), "application/json"); }
     });
 

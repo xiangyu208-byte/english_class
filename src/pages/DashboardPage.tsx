@@ -8,19 +8,25 @@ import {
 } from 'recharts';
 import { GraduationCap, Gamepad2, Flame, ArrowRight, Plus, Users, BookOpen, ClipboardCheck, Shield, Wrench } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { getDashboardStats, type DashboardStats, type ApiWord, getAdminDashboard, adminGetConfig } from '../lib/api';
+import { getDashboardStats, type DashboardStats, type ApiWord, getAdminDashboard, adminGetConfig, getStats } from '../lib/api';
 import { User, Word, Page } from '../types';
 import type { AdminDashboardStats, SystemConfig } from '../types';
 
-const weekData = [
-  { name: '周一', value: 40 },
-  { name: '周二', value: 65 },
-  { name: '周三', value: 50 },
-  { name: '周四', value: 85 },
-  { name: '周五', value: 60 },
-  { name: '周六', value: 95 },
-  { name: '周日', value: 75 },
-];
+const DAY_SHORT = ['日', '一', '二', '三', '四', '五', '六'];
+
+function buildWeekData(daily: number[]) {
+  const today = new Date();
+  const result = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    result.push({
+      name: '周' + DAY_SHORT[d.getDay()],
+      value: (daily && daily[6 - i]) || 0,
+    });
+  }
+  return result;
+}
 
 interface DashboardPageProps {
   onPageChange: (page: any) => void;
@@ -35,6 +41,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onPageChange, isAd
   const [mounted, setMounted] = useState(false);
   const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  const [dailyTests, setDailyTests] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
 
   useEffect(() => {
       loadDashboard();
@@ -49,6 +56,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onPageChange, isAd
       setStats(data);
       setRecentWords(data.recentWords || []);
       setWordOfDay(data.wordOfDay || null);
+      if (!isAdminComputed && (user?.username || user?.id)) {
+        try {
+          const s = await getStats(user.username || user.id || '');
+          if (s.daily_tests && Array.isArray(s.daily_tests)) {
+            setDailyTests(s.daily_tests);
+          }
+        } catch {}
+      }
       if (isAdminComputed) {
         try { const ads = await getAdminDashboard(); setAdminStats(ads); } catch (e) { console.error('getAdminDashboard failed:', e); }
       }
@@ -249,7 +264,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onPageChange, isAd
           <div>
             <h3 className="font-headline text-2xl font-bold text-primary mb-6">学习速率</h3>
             <div className="h-48 w-full" style={{ minWidth: 0, minHeight: 200 }}>
-              {mounted ? (
+              {mounted ? (() => {
+                const weekData = buildWeekData(dailyTests);
+                return (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={weekData}>
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
@@ -260,7 +277,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onPageChange, isAd
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#72787f' }} />
                   </BarChart>
                 </ResponsiveContainer>
-              ) : <div style={{ width: '100%', height: '100%' }} />}
+                );
+              })() : <div style={{ width: '100%', height: '100%' }} />}
             </div>
           </div>
         </div>
@@ -289,6 +307,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onPageChange, isAd
           </div>
           <div className="absolute -right-4 -bottom-4 opacity-20 transform rotate-12">
             <GraduationCap className="w-32 h-32" />
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-amber-500 to-orange-600 text-white p-8 rounded-xl flex flex-col justify-between overflow-hidden relative shadow-sm">
+          <div className="relative z-10">
+            <h3 className="font-headline text-2xl font-bold mb-2">连续打卡</h3>
+            <p className="text-amber-100 text-sm">保持学习习惯</p>
+          </div>
+          <div className="relative z-10 flex items-end gap-2">
+            <span className="font-headline text-6xl font-black">{stats?.userStats?.streak ?? 0}</span>
+            <span className="text-lg font-bold mb-2 text-amber-100">天</span>
+          </div>
+          <div className="absolute -right-4 -bottom-4 opacity-20 transform rotate-12">
+            <Flame className="w-32 h-32 fill-current" />
           </div>
         </div>
       </section>
